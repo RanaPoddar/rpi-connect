@@ -1,15 +1,5 @@
 # Raspberry Pi Remote Control
 
-Control your Raspberry Pi remotely via Socket.IO with camera streaming capabilities.
-
-## Features
-
-- **Remote Control**: Execute commands on Pi via Socket.IO
-- **System Monitoring**: CPU, memory, disk usage, temperature
-- **Camera Control**: Test, capture images, live streaming
-- **WebRTC Support**: Low-latency video streaming
-- **Auto-reconnect**: Maintains connection to server
-
 ## Installation
 
 ### On Raspberry Pi
