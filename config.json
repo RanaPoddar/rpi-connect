@@ -1,0 +1,22 @@
+{
+  "server_url": "http://192.168.1.100:3000",
+  "pi_id": "detection_drone_pi_pushpak",
+  "camera": {
+    "enabled": true,
+    "resolution": [1920, 1080],
+    "framerate": 30,
+    "quality": 85
+  },
+  "webrtc": {
+    "enabled": true,
+    "ice_servers": [
+      {
+        "urls": "stun:stun.l.google.com:19302"
+      }
+    ]
+  },
+  "monitoring": {
+    "stats_interval": 10,
+    "auto_reconnect": true
+  }
+}
