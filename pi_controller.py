@@ -123,6 +123,13 @@ class PiController:
                 if camera_active:
                     return {'success': True, 'message': 'Camera already active'}
                 
+                # Check if cameras are available
+                cameras = Picamera2.global_camera_info()
+                if not cameras:
+                    return {'success': False, 'message': 'No cameras detected. Check camera connection and enable in raspi-config.'}
+                
+                print(f"Available cameras: {cameras}")
+                
                 test_camera = Picamera2()
                 config = test_camera.create_preview_configuration(main={"size": (640, 480)})
                 test_camera.configure(config)
@@ -131,7 +138,7 @@ class PiController:
                 test_camera.stop()
                 test_camera.close()
                 
-                return {'success': True, 'message': 'Camera test successful'}
+                return {'success': True, 'message': f'Camera test successful. Found {len(cameras)} camera(s).'}
         except Exception as e:
             return {'success': False, 'message': f'Camera test failed: {str(e)}'}
     
@@ -144,6 +151,11 @@ class PiController:
         
         try:
             with camera_lock:
+                # Check if cameras are available
+                cameras = Picamera2.global_camera_info()
+                if not cameras:
+                    return {'success': False, 'message': 'No cameras detected. Check camera connection and enable in raspi-config.'}
+                
                 camera = Picamera2()
                 config = camera.create_still_configuration(main={"size": (1920, 1080)})
                 camera.configure(config)
@@ -178,6 +190,11 @@ class PiController:
                 return {'success': False, 'message': 'Camera already active'}
             
             try:
+                # Check if cameras are available
+                cameras = Picamera2.global_camera_info()
+                if not cameras:
+                    return {'success': False, 'message': 'No cameras detected. Check camera connection and enable in raspi-config.'}
+                
                 self.camera = Picamera2()
                 resolution = tuple(settings.get('resolution', [640, 480]))
                 config = self.camera.create_video_configuration(
