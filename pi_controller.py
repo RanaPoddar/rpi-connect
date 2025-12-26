@@ -301,6 +301,12 @@ class PiController:
                 )
                 self.camera.configure(config)
                 self.camera.start()
+                
+                # Wait for camera auto white balance to settle (critical for accurate colors)
+                print(f"Camera starting - waiting 3 seconds for white balance to settle...")
+                time.sleep(3)
+                print(f"Camera ready with Daylight white balance mode")
+                
                 camera_active = True
                 streaming_active = True
                 
