@@ -1,0 +1,7 @@
+Vishal's ip : // 
+  // 10.204.239.205
+
+
+  /home/pi/BRAND_NEW/pi_control/rpi-connect
+
+  source venv/bin/activate

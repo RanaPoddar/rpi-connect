@@ -195,7 +195,15 @@ class PiController:
                 print(f"Available cameras: {cameras}")
                 
                 test_camera = Picamera2()
-                config = test_camera.create_preview_configuration(main={"size": (640, 480)})
+                config = test_camera.create_preview_configuration(
+                    main={"size": (640, 480)},
+                    controls={
+                        "AwbEnable": True,
+                        "AwbMode": 0,  # Auto white balance
+                        "Saturation": 1.0,
+                        "Contrast": 1.0
+                    }
+                )
                 test_camera.configure(config)
                 test_camera.start()
                 time.sleep(2)  # Camera warm-up
@@ -221,7 +229,16 @@ class PiController:
                     return {'success': False, 'message': 'No cameras detected. Check camera connection and enable in raspi-config.'}
                 
                 camera = Picamera2()
-                config = camera.create_still_configuration(main={"size": (1920, 1080)})
+                config = camera.create_still_configuration(
+                    main={"size": (1920, 1080)},
+                    controls={
+                        "AwbEnable": True,
+                        "AwbMode": 0,  # Auto white balance
+                        "Saturation": 1.0,
+                        "Contrast": 1.0,
+                        "Sharpness": 1.0
+                    }
+                )
                 camera.configure(config)
                 camera.start()
                 time.sleep(2)  # Camera warm-up
@@ -263,7 +280,15 @@ class PiController:
                 resolution = tuple(settings.get('resolution', [640, 480]))
                 config = self.camera.create_video_configuration(
                     main={"size": resolution, "format": "RGB888"},
-                    controls={"FrameRate": settings.get('framerate', 30)}
+                    controls={
+                        "FrameRate": settings.get('framerate', 30),
+                        "AwbEnable": True,
+                        "AwbMode": 0,  # Auto white balance (0=Auto, 1=Tungsten, 2=Fluorescent, 3=Indoor, 4=Daylight, 5=Cloudy)
+                        "Saturation": 1.0,  # Normal saturation
+                        "Contrast": 1.0,    # Normal contrast
+                        "Brightness": 0.0,  # Normal brightness
+                        "Sharpness": 1.0    # Normal sharpness
+                    }
                 )
                 self.camera.configure(config)
                 self.camera.start()

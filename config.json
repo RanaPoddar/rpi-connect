@@ -1,5 +1,5 @@
 {
-  "server_url": "http://10.204.239.205:3000",
+  "server_url": "http://100.117.247.99:3000",
   "pi_id": "detection_drone_pi_pushpak",
   "camera": {
     "enabled": true,
