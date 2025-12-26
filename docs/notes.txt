@@ -5,3 +5,5 @@ Vishal's ip : //
   /home/pi/BRAND_NEW/pi_control/rpi-connect
 
   source venv/bin/activate
+
+  python3 pi_controller.py
