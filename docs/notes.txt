@@ -7,3 +7,16 @@ Vishal's ip : //
   source venv/bin/activate
 
   python3 pi_controller.py
+
+
+SERIAL2_BAUD = 921   (57)
+SERIAL2_PROTOCOL = 1
+SERIAL2_OPTIONS = 0
+BRD_SER1_RTSCTS = 0  (2)
+BRD_SER2_RTSCTS = 0  (2)
+
+SYSID_MYGCS = 255
+MAV_0_CONFIG = 1
+
+
+baud=921600
