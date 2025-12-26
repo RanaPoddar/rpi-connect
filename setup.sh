@@ -20,10 +20,20 @@ echo ""
 echo "Updating system packages..."
 sudo apt-get update
 
+# Install python3-venv if not present
+echo ""
+echo "Installing python3-venv..."
+sudo apt-get install -y python3-venv python3-full
+
+# Create virtual environment
+echo ""
+echo "Creating virtual environment..."
+python3 -m venv venv
+
 # Install Python dependencies
 echo ""
 echo "Installing Python dependencies..."
-pip3 install -r requirements.txt
+./venv/bin/pip install -r requirements.txt
 
 # Enable camera
 echo ""
@@ -42,7 +52,7 @@ After=network.target
 Type=simple
 User=$USER
 WorkingDirectory=$(pwd)
-ExecStart=/usr/bin/python3 $(pwd)/pi_controller.py
+ExecStart=$(pwd)/venv/bin/python $(pwd)/pi_controller.py
 Restart=always
 RestartSec=10
 Environment="SERVER_URL=http://localhost:3000"
@@ -62,7 +72,7 @@ echo "=========================================="
 echo ""
 echo "Next steps:"
 echo "1. Edit config.json to set your server URL"
-echo "2. Test camera: python3 test_camera.py"
+echo "2. Test camera: ./venv/bin/python test_camera.py"
 echo "3. Start service: sudo systemctl start pi-controller"
 echo "4. Enable on boot: sudo systemctl enable pi-controller"
 echo "5. Check status: sudo systemctl status pi-controller"
