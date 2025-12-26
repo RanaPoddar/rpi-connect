@@ -113,6 +113,12 @@ class PiController:
         """Callback for Pixhawk telemetry updates - sends to server via Socket.IO"""
         try:
             if sio.connected:
+                # Add connection status to telemetry
+                if not telemetry_data.get('connected', False):
+                    telemetry_data['status_message'] = 'Pixhawk Not Connected'
+                else:
+                    telemetry_data['status_message'] = 'Connected'
+                
                 sio.emit('drone_telemetry', {
                     'pi_id': PI_ID,
                     'telemetry': telemetry_data,

@@ -230,10 +230,17 @@ class PixhawkTelemetry:
     
     def _update_real_telemetry(self):
         """Update telemetry from real Pixhawk connection"""
-        if not self.vehicle:
+        if not self.vehicle or not self.connected:
+            # If not connected, mark telemetry as disconnected
+            with self.lock:
+                self.telemetry_data['connected'] = False
+                self.telemetry_data['timestamp'] = datetime.now().isoformat()
+                self.telemetry_data['flight_mode'] = 'NOT CONNECTED'
+                self.telemetry_data['system_status'] = 'PIXHAWK NOT CONNECTED'
             return
         
         with self.lock:
+            self.telemetry_data['connected'] = True
             self.telemetry_data['timestamp'] = datetime.now().isoformat()
             
             # GPS data

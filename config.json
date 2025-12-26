@@ -11,7 +11,7 @@
     "enabled": true,
     "connection_string": "/dev/ttyACM0",
     "baud_rate": 57600,
-    "simulation_mode": true,
+    "simulation_mode": false,
     "update_rate": 1.0
   },
   "webrtc": {
