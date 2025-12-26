@@ -291,21 +291,22 @@ class PiController:
                     main={"size": resolution, "format": "RGB888"},
                     controls={
                         "FrameRate": settings.get('framerate', 30),
-                        "AwbEnable": True,
-                        "AwbMode": 4,  # Daylight mode (natural colors for outdoor/HQ camera)
-                        "Saturation": 1.0,  # Normal saturation
-                        "Contrast": 1.0,    # Normal contrast
-                        "Brightness": 0.0,  # Normal brightness
-                        "Sharpness": 1.0    # Normal sharpness
+                        "AeEnable": True,  # Auto exposure
+                        "AwbEnable": False,  # Disable auto, use manual gains
+                        "ColourGains": (1.5, 1.5),  # Manual white balance (Red, Blue) - reduces blue tint
+                        "Saturation": 1.0,
+                        "Contrast": 1.0,
+                        "Brightness": 0.0,
+                        "Sharpness": 1.0
                     }
                 )
                 self.camera.configure(config)
                 self.camera.start()
                 
-                # Wait for camera auto white balance to settle (critical for accurate colors)
-                print(f"Camera starting - waiting 3 seconds for white balance to settle...")
-                time.sleep(3)
-                print(f"Camera ready with Daylight white balance mode")
+                # Wait for camera auto exposure to settle
+                print(f"Camera starting - waiting 2 seconds for exposure to settle...")
+                time.sleep(2)
+                print(f"Camera ready with manual white balance (daylight tuned)")
                 
                 camera_active = True
                 streaming_active = True
