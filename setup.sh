@@ -30,6 +30,11 @@ echo ""
 echo "Creating virtual environment..."
 python3 -m venv venv
 
+# Upgrade pip and install build tools
+echo ""
+echo "Upgrading pip and installing build tools..."
+./venv/bin/pip install --upgrade pip setuptools wheel
+
 # Install Python dependencies
 echo ""
 echo "Installing Python dependencies..."
