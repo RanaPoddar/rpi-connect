@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Raspberry Pi Controller - Runs on the Pi to receive commands via Socket.IO
-Handles camera, system control, and WebRTC streaming
+Handles camera, system control, WebRTC streaming, and drone telemetry
 """
 
 import socketio
@@ -20,6 +20,15 @@ import base64
 from threading import Thread, Lock
 import numpy as np
 
+# Import Pixhawk telemetry module
+try:
+    from modules.pixhawk_telemetry import PixhawkTelemetry
+    PIXHAWK_MODULE_AVAILABLE = True
+except ImportError as e:
+    print(f"⚠️  Pixhawk telemetry module not available: {e}")
+    PIXHAWK_MODULE_AVAILABLE = False
+    PixhawkTelemetry = None
+
 # Load configuration from config.json
 def load_config():
     try:
@@ -36,6 +45,8 @@ config = load_config()
 SERVER_URL = config.get('server_url', os.environ.get('SERVER_URL', 'http://localhost:3000'))
 PI_ID = config.get('pi_id', os.environ.get('PI_ID', 'pi_001'))
 CAMERA_ENABLED = config.get('camera', {}).get('enabled', True)
+PIXHAWK_ENABLED = config.get('pixhawk', {}).get('enabled', True)
+PIXHAWK_CONFIG = config.get('pixhawk', {})
 
 # Ini socket  client
 sio = socketio.Client(reconnection=True, reconnection_attempts=0)
@@ -49,6 +60,22 @@ class PiController:
     def __init__(self):
         self.camera = None
         self.is_running = True
+        self.pixhawk = None
+        self.pixhawk_enabled = PIXHAWK_ENABLED and PIXHAWK_MODULE_AVAILABLE
+        
+        # Initialize Pixhawk telemetry if enabled
+        if self.pixhawk_enabled:
+            print("🚁 Initializing Pixhawk telemetry...")
+            self.pixhawk = PixhawkTelemetry(PIXHAWK_CONFIG)
+            if self.pixhawk.connect():
+                print("✅ Pixhawk telemetry initialized")
+                # Start telemetry updates with callback
+                self.pixhawk.start_telemetry_updates(callback=self._on_telemetry_update)
+            else:
+                print("❌ Failed to initialize Pixhawk telemetry")
+                self.pixhawk = None
+        else:
+            print("ℹ️  Pixhawk telemetry disabled or module not available")
         
     def get_system_stats(self):
         """Get Pi system statistics"""
@@ -79,6 +106,37 @@ class PiController:
         except:
             return None
     
+    def _on_telemetry_update(self, telemetry_data):
+        """Callback for Pixhawk telemetry updates - sends to server via Socket.IO"""
+        try:
+            if sio.connected:
+                sio.emit('drone_telemetry', {
+                    'pi_id': PI_ID,
+                    'telemetry': telemetry_data,
+                    'timestamp': datetime.now().isoformat()
+                })
+        except Exception as e:
+            print(f"Error sending telemetry: {e}")
+    
+    def get_pixhawk_status(self):
+        """Get Pixhawk connection status and current telemetry"""
+        if not self.pixhawk:
+            return {
+                'enabled': False,
+                'connected': False,
+                'message': 'Pixhawk module not initialized'
+            }
+        
+        status = self.pixhawk.get_connection_status()
+        telemetry = self.pixhawk.get_telemetry()
+        
+        return {
+            'enabled': True,
+            'connected': status['connected'],
+            'simulation_mode': status['simulation_mode'],
+            'telemetry': telemetry
+        }
+    
     def execute_command(self, command, args=None):
         """Execute system commands"""
         try:
@@ -104,6 +162,12 @@ class PiController:
             
             elif command == 'capture_image':
                 return self.capture_image()
+            
+            elif command == 'pixhawk_status':
+                return {'success': True, 'data': self.get_pixhawk_status()}
+            
+            elif command == 'pixhawk_reconnect':
+                return self.reconnect_pixhawk()
             
             else:
                 return {'success': False, 'message': f'Unknown command: {command}'}
@@ -264,6 +328,44 @@ class PiController:
             print(f"Streaming error: {e}")
         finally:
             streaming_active = False
+    
+    def reconnect_pixhawk(self):
+        """Reconnect to Pixhawk flight controller"""
+        if not self.pixhawk_enabled:
+            return {'success': False, 'message': 'Pixhawk module not enabled'}
+        
+        try:
+            # Disconnect if already connected
+            if self.pixhawk:
+                self.pixhawk.disconnect()
+            
+            # Reinitialize
+            self.pixhawk = PixhawkTelemetry(PIXHAWK_CONFIG)
+            
+            if self.pixhawk.connect():
+                self.pixhawk.start_telemetry_updates(callback=self._on_telemetry_update)
+                return {'success': True, 'message': 'Reconnected to Pixhawk'}
+            else:
+                return {'success': False, 'message': 'Failed to reconnect to Pixhawk'}
+        
+        except Exception as e:
+            return {'success': False, 'message': f'Reconnection error: {str(e)}'}
+    
+    def shutdown(self):
+        """Clean shutdown of all systems"""
+        print("\n🛑 Shutting down Pi Controller...")
+        
+        # Stop camera
+        if camera_active:
+            self.stop_camera_stream()
+        
+        # Stop Pixhawk telemetry
+        if self.pixhawk:
+            print("   Disconnecting Pixhawk...")
+            self.pixhawk.disconnect()
+        
+        self.is_running = False
+        print("✅ Shutdown complete")
 
 # Initialize controller
 controller = PiController()
@@ -334,6 +436,27 @@ def handle_ping(data):
     """Respond to ping"""
     sio.emit('pong', {'pi_id': PI_ID, 'timestamp': time.time()})
 
+@sio.on('request_telemetry')
+def handle_telemetry_request(data):
+    """Send current drone telemetry"""
+    status = controller.get_pixhawk_status()
+    sio.emit('drone_telemetry', {
+        'pi_id': PI_ID,
+        'telemetry': status.get('telemetry', {}),
+        'connected': status.get('connected', False),
+        'timestamp': datetime.now().isoformat()
+    })
+
+@sio.on('reconnect_pixhawk')
+def handle_reconnect_pixhawk(data):
+    """Reconnect to Pixhawk"""
+    result = controller.reconnect_pixhawk()
+    sio.emit('pixhawk_status', {
+        'pi_id': PI_ID,
+        'status': result,
+        'timestamp': datetime.now().isoformat()
+    })
+
 def main():
     """Main function"""
     print(f"Starting Pi Controller for {PI_ID}")
@@ -355,7 +478,7 @@ def main():
     except Exception as e:
         print(f"Error: {e}")
     finally:
-        controller.stop_camera_stream()
+        controller.shutdown()
         if sio.connected:
             sio.disconnect()
 

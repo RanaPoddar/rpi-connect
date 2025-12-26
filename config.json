@@ -7,6 +7,13 @@
     "framerate": 30,
     "quality": 85
   },
+  "pixhawk": {
+    "enabled": true,
+    "connection_string": "/dev/ttyACM0",
+    "baud_rate": 57600,
+    "simulation_mode": true,
+    "update_rate": 1.0
+  },
   "webrtc": {
     "enabled": true,
     "ice_servers": [

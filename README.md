@@ -1,5 +1,28 @@
 # Raspberry Pi Remote Control
 
+Remote control and monitoring system for Raspberry Pi with camera control, system monitoring, and **Pixhawk flight controller telemetry**.
+
+## Features
+
+- 🎥 **Camera Control**: Live streaming, image capture, camera testing
+- 💻 **System Monitoring**: CPU temperature, usage stats, memory, disk
+- 🚁 **Drone Telemetry**: Real-time telemetry from Pixhawk flight controller
+- 🌐 **Remote Control**: Execute commands, reboot, restart services
+- 🔌 **Socket.IO**: Real-time bidirectional communication
+
+## New: Pixhawk Telemetry Integration
+
+The system now supports real-time telemetry from Pixhawk flight controllers:
+
+- GPS coordinates and altitude
+- Attitude (roll, pitch, yaw)
+- Flight mode and armed status
+- Battery voltage and current
+- Velocity and heading
+- System health indicators
+
+📖 **For detailed documentation, see [PIXHAWK_TELEMETRY.md](PIXHAWK_TELEMETRY.md)**
+
 ## Installation
 
 ### On Raspberry Pi

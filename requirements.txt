@@ -4,3 +4,5 @@ psutil==5.9.6
 opencv-python
 numpy
 pillow
+dronekit==2.9.2
+pymavlink==2.4.37
