@@ -20,10 +20,22 @@ import base64
 from threading import Thread, Lock
 import numpy as np
 
+# Load configuration from config.json
+def load_config():
+    try:
+        with open('config.json', 'r') as f:
+            config = json.load(f)
+        return config
+    except Exception as e:
+        print(f"Error loading config.json: {e}")
+        return {}
+
+config = load_config()
+
 # Configuration
-SERVER_URL = os.environ.get('SERVER_URL', 'http://localhost:3000')
-PI_ID = os.environ.get('PI_ID', 'pi_001')
-CAMERA_ENABLED = True
+SERVER_URL = config.get('server_url', os.environ.get('SERVER_URL', 'http://localhost:3000'))
+PI_ID = config.get('pi_id', os.environ.get('PI_ID', 'pi_001'))
+CAMERA_ENABLED = config.get('camera', {}).get('enabled', True)
 
 # Ini socket  client
 sio = socketio.Client(reconnection=True, reconnection_attempts=0)
