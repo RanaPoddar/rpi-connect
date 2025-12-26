@@ -9,6 +9,9 @@ Vishal's ip : //
   python3 pi_controller.py
 
 
+  git pull origin pixhawk-support
+
+
 SERIAL2_BAUD = 921   (57)
 SERIAL2_PROTOCOL = 1
 SERIAL2_OPTIONS = 0

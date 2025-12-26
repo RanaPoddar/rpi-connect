@@ -208,7 +208,7 @@ class PiController:
                     main={"size": (640, 480)},
                     controls={
                         "AwbEnable": True,
-                        "AwbMode": 0,  # Auto white balance
+                        "AwbMode": 4,  # Daylight mode (natural colors)
                         "Saturation": 1.0,
                         "Contrast": 1.0
                     }
@@ -242,7 +242,7 @@ class PiController:
                     main={"size": (1920, 1080)},
                     controls={
                         "AwbEnable": True,
-                        "AwbMode": 0,  # Auto white balance
+                        "AwbMode": 4,  # Daylight mode (natural colors)
                         "Saturation": 1.0,
                         "Contrast": 1.0,
                         "Sharpness": 1.0
@@ -292,7 +292,7 @@ class PiController:
                     controls={
                         "FrameRate": settings.get('framerate', 30),
                         "AwbEnable": True,
-                        "AwbMode": 0,  # Auto white balance (0=Auto, 1=Tungsten, 2=Fluorescent, 3=Indoor, 4=Daylight, 5=Cloudy)
+                        "AwbMode": 4,  # Daylight mode (natural colors for outdoor/HQ camera)
                         "Saturation": 1.0,  # Normal saturation
                         "Contrast": 1.0,    # Normal contrast
                         "Brightness": 0.0,  # Normal brightness
