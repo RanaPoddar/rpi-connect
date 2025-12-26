@@ -22,13 +22,13 @@ sudo apt-get update
 
 # Install python3-venv if not present
 echo ""
-echo "Installing python3-venv..."
-sudo apt-get install -y python3-venv python3-full
+echo "Installing python3-venv and system dependencies..."
+sudo apt-get install -y python3-venv python3-full python3-picamera2 python3-libcamera
 
 # Create virtual environment
 echo ""
-echo "Creating virtual environment..."
-python3 -m venv venv
+echo "Creating virtual environment with system site packages..."
+python3 -m venv --system-site-packages venv
 
 # Upgrade pip and install build tools
 echo ""
