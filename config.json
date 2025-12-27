@@ -10,7 +10,7 @@
   "pixhawk": {
     "enabled": true,
     "connection_string": "/dev/serial0",
-    "baud_rate": 921600,
+    "baud_rate": 57600,
     "simulation_mode": false,
     "update_rate": 1.0
   },
