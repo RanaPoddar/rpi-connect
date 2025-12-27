@@ -68,17 +68,17 @@ class PiController:
         
         # Initialize Pixhawk telemetry if enabled
         if self.pixhawk_enabled:
-            print("🚁 Initializing Pixhawk telemetry...")
+            print(" Initializing Pixhawk telemetry...")
             self.pixhawk = PixhawkTelemetry(PIXHAWK_CONFIG)
             if self.pixhawk.connect():
-                print("✅ Pixhawk telemetry initialized")
+                print("Pixhawk telemetry initialized")
                 # Start telemetry updates with callback
                 self.pixhawk.start_telemetry_updates(callback=self._on_telemetry_update)
             else:
-                print("❌ Failed to initialize Pixhawk telemetry")
+                print(" Failed to initialize Pixhawk telemetry")
                 self.pixhawk = None
         else:
-            print("ℹ️  Pixhawk telemetry disabled or module not available")
+            print(" Pixhawk telemetry disabled or module not available")
         
     def get_system_stats(self):
         """Get Pi system statistics"""
@@ -177,6 +177,9 @@ class PiController:
             
             elif command == 'pixhawk_reconnect':
                 return self.reconnect_pixhawk()
+            
+            elif command == 'mark_waypoint':
+                return self.mark_waypoint(args)
             
             else:
                 return {'success': False, 'message': f'Unknown command: {command}'}
@@ -392,9 +395,64 @@ class PiController:
         except Exception as e:
             return {'success': False, 'message': f'Reconnection error: {str(e)}'}
     
+    def mark_waypoint(self, args=None):
+        """Mark current GPS location as a waypoint"""
+        try:
+            if not self.pixhawk:
+                return {'success': False, 'message': 'Pixhawk not available'}
+            
+            # Get current telemetry
+            telemetry = self.pixhawk.get_telemetry()
+            
+            if not telemetry.get('connected', False):
+                return {'success': False, 'message': 'Pixhawk not connected'}
+            
+            gps_data = telemetry.get('gps', {})
+            lat = gps_data.get('lat', 0.0)
+            lon = gps_data.get('lon', 0.0)
+            alt = gps_data.get('alt', 0.0)
+            
+            # Check if GPS has valid fix
+            if lat == 0.0 and lon == 0.0:
+                return {'success': False, 'message': 'No GPS fix available'}
+            
+            # Get additional data
+            waypoint_name = args.get('name', '') if args else ''
+            
+            # Create waypoint data
+            waypoint_data = {
+                'waypoint_id': f'WP_{int(time.time() * 1000)}_{PI_ID}',
+                'pi_id': PI_ID,
+                'name': waypoint_name,
+                'latitude': lat,
+                'longitude': lon,
+                'altitude': alt,
+                'relative_altitude': gps_data.get('relative_alt', 0.0),
+                'heading': telemetry.get('heading', 0),
+                'flight_mode': telemetry.get('flight_mode', 'UNKNOWN'),
+                'timestamp': time.time(),
+                'datetime': datetime.now().isoformat(),
+                'gps_satellites': gps_data.get('satellites', 0),
+                'gps_fix_type': gps_data.get('fix_type', 0)
+            }
+            
+            # Send waypoint to server via Socket.IO
+            if sio.connected:
+                sio.emit('waypoint_marked', waypoint_data)
+                print(f"✓ Waypoint marked: {waypoint_data['waypoint_id']} at ({lat:.6f}, {lon:.6f})")
+            
+            return {
+                'success': True,
+                'message': f'Waypoint marked at ({lat:.6f}, {lon:.6f})',
+                'data': waypoint_data
+            }
+            
+        except Exception as e:
+            return {'success': False, 'message': f'Error marking waypoint: {str(e)}'}
+    
     def shutdown(self):
         """Clean shutdown of all systems"""
-        print("\n🛑 Shutting down Pi Controller...")
+        print("\n Shutting down Pi Controller...")
         
         # Stop camera
         if camera_active:
@@ -406,7 +464,7 @@ class PiController:
             self.pixhawk.disconnect()
         
         self.is_running = False
-        print("✅ Shutdown complete")
+        print(" Shutdown complete")
 
 # Initialize controller
 controller = PiController()
