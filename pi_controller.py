@@ -228,12 +228,49 @@ class PiController:
     
     def capture_image(self):
         """Capture a single image from camera"""
-        global CAMERA_ENABLED
+        global CAMERA_ENABLED, camera_active, streaming_active
         
         if not CAMERA_ENABLED:
             return {'success': False, 'message': 'Camera disabled'}
         
         try:
+            import cv2
+            
+            # Create captured_images directory if it doesn't exist
+            capture_dir = os.path.join(os.path.dirname(__file__), 'captured_images')
+            os.makedirs(capture_dir, exist_ok=True)
+            
+            # Generate filename with timestamp
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            filename = f'capture_{PI_ID}_{timestamp}.jpg'
+            filepath = os.path.join(capture_dir, filename)
+            
+            # If camera is already streaming, capture from active stream
+            if camera_active and self.camera:
+                with camera_lock:
+                    # Capture from the active camera
+                    image_array = self.camera.capture_array()
+                    
+                    # Convert RGB to BGR for JPEG encoding
+                    image_bgr = cv2.cvtColor(image_array, cv2.COLOR_RGB2BGR)
+                    
+                    # Save to disk
+                    cv2.imwrite(filepath, image_bgr, [cv2.IMWRITE_JPEG_QUALITY, 85])
+                    
+                    # Encode for transmission
+                    _, buffer = cv2.imencode('.jpg', image_bgr, [cv2.IMWRITE_JPEG_QUALITY, 85])
+                    image_data = base64.b64encode(buffer).decode('utf-8')
+                    
+                    return {
+                        'success': True,
+                        'message': f'Image captured and saved to {filename}',
+                        'image': image_data,
+                        'filepath': filepath,
+                        'filename': filename,
+                        'timestamp': datetime.now().isoformat()
+                    }
+            
+            # If camera is not active, create new instance for single capture
             with camera_lock:
                 # Check if cameras are available
                 cameras = Picamera2.global_camera_info()
@@ -255,20 +292,27 @@ class PiController:
                 camera.start()
                 time.sleep(2)  # Camera warm-up
                 
-                # Capture to numpy array and encode
+                # Capture to numpy array
                 image_array = camera.capture_array()
                 camera.stop()
                 camera.close()
                 
                 # Convert RGB to BGR for JPEG encoding
-                import cv2
-                _, buffer = cv2.imencode('.jpg', cv2.cvtColor(image_array, cv2.COLOR_RGB2BGR), [cv2.IMWRITE_JPEG_QUALITY, 85])
+                image_bgr = cv2.cvtColor(image_array, cv2.COLOR_RGB2BGR)
+                
+                # Save to disk
+                cv2.imwrite(filepath, image_bgr, [cv2.IMWRITE_JPEG_QUALITY, 85])
+                
+                # Encode for transmission
+                _, buffer = cv2.imencode('.jpg', image_bgr, [cv2.IMWRITE_JPEG_QUALITY, 85])
                 image_data = base64.b64encode(buffer).decode('utf-8')
                 
                 return {
                     'success': True,
-                    'message': 'Image captured',
+                    'message': f'Image captured and saved to {filename}',
                     'image': image_data,
+                    'filepath': filepath,
+                    'filename': filename,
                     'timestamp': datetime.now().isoformat()
                 }
         except Exception as e:
