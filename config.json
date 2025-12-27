@@ -14,6 +14,17 @@
     "simulation_mode": false,
     "update_rate": 1.0
   },
+  "safety": {
+    "geofence_enabled": true,
+    "geofence_radius": 500,
+    "geofence_max_altitude": 120,
+    "geofence_min_altitude": 2,
+    "battery_rtl_threshold": 25,
+    "battery_land_threshold": 15,
+    "battery_critical_voltage": 10.5,
+    "connection_timeout": 10,
+    "telemetry_timeout": 5
+  },
   "webrtc": {
     "enabled": true,
     "ice_servers": [

@@ -32,6 +32,24 @@ except ImportError as e:
     PIXHAWK_MODULE_AVAILABLE = False
     PixhawkTelemetry = None
 
+# Import MAVLink commander module
+try:
+    from modules.mavlink_commander import MAVLinkCommander
+    MAVLINK_COMMANDER_AVAILABLE = True
+except ImportError as e:
+    print(f"⚠️  MAVLink commander module not available: {e}")
+    MAVLINK_COMMANDER_AVAILABLE = False
+    MAVLinkCommander = None
+
+# Import Safety Manager module
+try:
+    from modules.safety_manager import SafetyManager
+    SAFETY_MANAGER_AVAILABLE = True
+except ImportError as e:
+    print(f"⚠️  Safety Manager module not available: {e}")
+    SAFETY_MANAGER_AVAILABLE = False
+    SafetyManager = None
+
 # Load configuration from config.json
 def load_config():
     try:
@@ -64,21 +82,52 @@ class PiController:
         self.camera = None
         self.is_running = True
         self.pixhawk = None
+        self.commander = None
+        self.safety_manager = None
         self.pixhawk_enabled = PIXHAWK_ENABLED and PIXHAWK_MODULE_AVAILABLE
         
         # Initialize Pixhawk telemetry if enabled
         if self.pixhawk_enabled:
-            print(" Initializing Pixhawk telemetry...")
+            print("🚁 Initializing Pixhawk telemetry...")
             self.pixhawk = PixhawkTelemetry(PIXHAWK_CONFIG)
             if self.pixhawk.connect():
-                print("Pixhawk telemetry initialized")
+                print("✅ Pixhawk telemetry initialized")
                 # Start telemetry updates with callback
                 self.pixhawk.start_telemetry_updates(callback=self._on_telemetry_update)
+                
+                # Initialize MAVLink Commander if available
+                if MAVLINK_COMMANDER_AVAILABLE:
+                    print("🎮 Initializing MAVLink Commander...")
+                    self.commander = MAVLinkCommander(
+                        vehicle=self.pixhawk.vehicle,
+                        simulation_mode=PIXHAWK_CONFIG.get('simulation_mode', False)
+                    )
+                    print("✅ MAVLink Commander initialized")
+                else:
+                    print("⚠️  MAVLink Commander not available")
+                
+                # Initialize Safety Manager if available
+                if SAFETY_MANAGER_AVAILABLE:
+                    print("🛡️  Initializing Safety Manager...")
+                    safety_config = config.get('safety', {})
+                    self.safety_manager = SafetyManager(safety_config)
+                    
+                    # Set safety callbacks
+                    self.safety_manager.set_warning_callback(self._on_safety_warning)
+                    self.safety_manager.set_emergency_callback(self._on_safety_emergency)
+                    
+                    # Start safety monitoring
+                    self.safety_manager.start_monitoring(
+                        get_telemetry_func=lambda: self.pixhawk.get_telemetry() if self.pixhawk else {}
+                    )
+                    print("✅ Safety Manager initialized and monitoring started")
+                else:
+                    print("⚠️  Safety Manager not available")
             else:
-                print(" Failed to initialize Pixhawk telemetry")
+                print("❌ Failed to initialize Pixhawk telemetry")
                 self.pixhawk = None
         else:
-            print(" Pixhawk telemetry disabled or module not available")
+            print("⚠️  Pixhawk telemetry disabled or module not available")
         
     def get_system_stats(self):
         """Get Pi system statistics"""
@@ -124,8 +173,53 @@ class PiController:
                     'telemetry': telemetry_data,
                     'timestamp': datetime.now().isoformat()
                 })
+            
+            # Update safety manager telemetry timestamp
+            if self.safety_manager:
+                self.safety_manager.update_telemetry_timestamp()
+                
         except Exception as e:
             print(f"Error sending telemetry: {e}")
+    
+    def _on_safety_warning(self, warning: dict):
+        """Callback for safety warnings"""
+        print(f"⚠️  SAFETY WARNING: {warning.get('type', 'unknown')}")
+        
+        # Send warning to server
+        if sio.connected:
+            sio.emit('safety_warning', {
+                'pi_id': PI_ID,
+                'warning': warning,
+                'timestamp': datetime.now().isoformat()
+            })
+    
+    def _on_safety_emergency(self, emergency: dict):
+        """Callback for safety emergencies - take automatic action"""
+        action = emergency.get('action')
+        reason = emergency.get('reason')
+        
+        print(f"🚨 SAFETY EMERGENCY: {reason}")
+        print(f"   Automatic action: {action}")
+        
+        # Send emergency notification to server
+        if sio.connected:
+            sio.emit('safety_emergency', {
+                'pi_id': PI_ID,
+                'emergency': emergency,
+                'timestamp': datetime.now().isoformat()
+            })
+        
+        # Execute automatic safety action
+        if self.commander:
+            try:
+                if action == 'RTL':
+                    result = self.commander.return_to_launch()
+                    print(f"   RTL executed: {result.get('success', False)}")
+                elif action == 'LAND':
+                    result = self.commander.emergency_stop()
+                    print(f"   Emergency LAND executed: {result.get('success', False)}")
+            except Exception as e:
+                print(f"   ❌ Failed to execute safety action: {e}")
     
     def get_pixhawk_status(self):
         """Get Pixhawk connection status and current telemetry"""
@@ -168,6 +262,43 @@ class PiController:
             
             elif command == 'camera_test':
                 return self.test_camera()
+            
+            # MAVLink commander commands
+            elif command == 'arm':
+                return self.arm_vehicle(args)
+            
+            elif command == 'disarm':
+                return self.disarm_vehicle(args)
+            
+            elif command == 'set_mode':
+                return self.set_flight_mode(args)
+            
+            elif command == 'takeoff':
+                return self.takeoff_vehicle(args)
+            
+            elif command == 'land':
+                return self.land_vehicle(args)
+            
+            elif command == 'goto_location':
+                return self.goto_location(args)
+            
+            elif command == 'upload_mission':
+                return self.upload_mission(args)
+            
+            elif command == 'start_mission':
+                return self.start_mission(args)
+            
+            elif command == 'clear_mission':
+                return self.clear_mission(args)
+            
+            elif command == 'get_mission_progress':
+                return self.get_mission_progress(args)
+            
+            elif command == 'rtl':
+                return self.return_to_launch(args)
+            
+            elif command == 'emergency_stop':
+                return self.emergency_stop(args)
             
             elif command == 'capture_image':
                 return self.capture_image()
@@ -494,9 +625,242 @@ class PiController:
         except Exception as e:
             return {'success': False, 'message': f'Error marking waypoint: {str(e)}'}
     
+    # ============ MAVLINK COMMANDER METHODS ============
+    
+    def arm_vehicle(self, args=None):
+        """ARM the drone"""
+        if not self.commander:
+            return {'success': False, 'message': 'MAVLink Commander not available'}
+        
+        try:
+            force = args.get('force', False) if args else False
+            result = self.commander.arm(force=force)
+            return result
+        except Exception as e:
+            return {'success': False, 'message': f'ARM failed: {str(e)}'}
+    
+    def disarm_vehicle(self, args=None):
+        """DISARM the drone"""
+        if not self.commander:
+            return {'success': False, 'message': 'MAVLink Commander not available'}
+        
+        try:
+            force = args.get('force', False) if args else False
+            result = self.commander.disarm(force=force)
+            return result
+        except Exception as e:
+            return {'success': False, 'message': f'DISARM failed: {str(e)}'}
+    
+    def set_flight_mode(self, args=None):
+        """Change flight mode"""
+        if not self.commander:
+            return {'success': False, 'message': 'MAVLink Commander not available'}
+        
+        if not args or 'mode' not in args:
+            return {'success': False, 'message': 'Mode parameter required'}
+        
+        try:
+            mode = args['mode']
+            result = self.commander.set_mode(mode)
+            return result
+        except Exception as e:
+            return {'success': False, 'message': f'Mode change failed: {str(e)}'}
+    
+    def takeoff_vehicle(self, args=None):
+        """Takeoff to specified altitude"""
+        if not self.commander:
+            return {'success': False, 'message': 'MAVLink Commander not available'}
+        
+        if not args or 'altitude' not in args:
+            return {'success': False, 'message': 'Altitude parameter required'}
+        
+        try:
+            altitude = float(args['altitude'])
+            timeout = args.get('timeout', 60)
+            result = self.commander.takeoff(altitude, timeout=timeout)
+            return result
+        except Exception as e:
+            return {'success': False, 'message': f'Takeoff failed: {str(e)}'}
+    
+    def land_vehicle(self, args=None):
+        """Land the drone"""
+        if not self.commander:
+            return {'success': False, 'message': 'MAVLink Commander not available'}
+        
+        try:
+            timeout = args.get('timeout', 60) if args else 60
+            result = self.commander.land(timeout=timeout)
+            return result
+        except Exception as e:
+            return {'success': False, 'message': f'Landing failed: {str(e)}'}
+    
+    def goto_location(self, args=None):
+        """Navigate to GPS coordinates"""
+        if not self.commander:
+            return {'success': False, 'message': 'MAVLink Commander not available'}
+        
+        if not args or 'lat' not in args or 'lon' not in args:
+            return {'success': False, 'message': 'Latitude and longitude required'}
+        
+        try:
+            lat = float(args['lat'])
+            lon = float(args['lon'])
+            altitude = float(args.get('altitude')) if 'altitude' in args else None
+            groundspeed = float(args.get('groundspeed')) if 'groundspeed' in args else None
+            timeout = args.get('timeout', 120)
+            
+            result = self.commander.goto_location(lat, lon, altitude, groundspeed, timeout)
+            return result
+        except Exception as e:
+            return {'success': False, 'message': f'Navigation failed: {str(e)}'}
+    
+    def upload_mission(self, args=None):
+        """Upload multi-waypoint mission"""
+        if not self.commander:
+            return {'success': False, 'message': 'MAVLink Commander not available'}
+        
+        if not args or 'waypoints' not in args:
+            return {'success': False, 'message': 'Waypoints list required'}
+        
+        try:
+            waypoints = args['waypoints']
+            takeoff_alt = float(args.get('takeoff_alt')) if 'takeoff_alt' in args else None
+            
+            result = self.commander.upload_mission(waypoints, takeoff_alt=takeoff_alt)
+            return result
+        except Exception as e:
+            return {'success': False, 'message': f'Mission upload failed: {str(e)}'}
+    
+    def start_mission(self, args=None):
+        """Start the uploaded mission"""
+        if not self.commander:
+            return {'success': False, 'message': 'MAVLink Commander not available'}
+        
+        try:
+            result = self.commander.start_mission()
+            return result
+        except Exception as e:
+            return {'success': False, 'message': f'Mission start failed: {str(e)}'}
+    
+    def clear_mission(self, args=None):
+        """Clear the current mission"""
+        if not self.commander:
+            return {'success': False, 'message': 'MAVLink Commander not available'}
+        
+        try:
+            result = self.commander.clear_mission()
+            return result
+        except Exception as e:
+            return {'success': False, 'message': f'Mission clear failed: {str(e)}'}
+    
+    def get_mission_progress(self, args=None):
+        """Get current mission progress"""
+        if not self.commander:
+            return {'success': False, 'message': 'MAVLink Commander not available'}
+        
+        try:
+            result = self.commander.get_mission_progress()
+            return {'success': True, 'data': result}
+        except Exception as e:
+            return {'success': False, 'message': f'Failed to get mission progress: {str(e)}'}
+    
+    def return_to_launch(self, args=None):
+        """Return to launch point (RTL)"""
+        if not self.commander:
+            return {'success': False, 'message': 'MAVLink Commander not available'}
+        
+        try:
+            result = self.commander.return_to_launch()
+            return result
+        except Exception as e:
+            return {'success': False, 'message': f'RTL failed: {str(e)}'}
+    
+    def emergency_stop(self, args=None):
+        """Emergency stop - immediate LAND"""
+        if not self.commander:
+            return {'success': False, 'message': 'MAVLink Commander not available'}
+        
+        try:
+            result = self.commander.emergency_stop()
+            return result
+        except Exception as e:
+            return {'success': False, 'message': f'Emergency stop failed: {str(e)}'}
+    
+    # ============ SAFETY MANAGER METHODS ============
+    
+    def set_geofence(self, args=None):
+        """Set geofence center to current location or specified coordinates"""
+        if not self.safety_manager:
+            return {'success': False, 'message': 'Safety Manager not available'}
+        
+        try:
+            if args and 'lat' in args and 'lon' in args:
+                lat = float(args['lat'])
+                lon = float(args['lon'])
+            else:
+                # Use current location
+                if not self.pixhawk:
+                    return {'success': False, 'message': 'Cannot get current location - Pixhawk not available'}
+                
+                telemetry = self.pixhawk.get_telemetry()
+                gps = telemetry.get('gps', {})
+                lat = gps.get('lat', 0)
+                lon = gps.get('lon', 0)
+                
+                if lat == 0 and lon == 0:
+                    return {'success': False, 'message': 'No GPS fix available'}
+            
+            self.safety_manager.set_geofence_center(lat, lon)
+            
+            return {
+                'success': True,
+                'message': f'Geofence center set to ({lat:.6f}, {lon:.6f})',
+                'center': {'lat': lat, 'lon': lon}
+            }
+        except Exception as e:
+            return {'success': False, 'message': f'Set geofence failed: {str(e)}'}
+    
+    def check_pre_flight(self, args=None):
+        """Run pre-flight safety checklist"""
+        if not self.safety_manager:
+            return {'success': False, 'message': 'Safety Manager not available'}
+        
+        if not self.pixhawk:
+            return {'success': False, 'message': 'Pixhawk not available'}
+        
+        try:
+            telemetry = self.pixhawk.get_telemetry()
+            result = self.safety_manager.pre_flight_checklist(telemetry)
+            
+            return {
+                'success': True,
+                'data': result
+            }
+        except Exception as e:
+            return {'success': False, 'message': f'Pre-flight check failed: {str(e)}'}
+    
+    def get_safety_status(self, args=None):
+        """Get current safety status"""
+        if not self.safety_manager:
+            return {'success': False, 'message': 'Safety Manager not available'}
+        
+        try:
+            status = self.safety_manager.get_safety_status()
+            return {
+                'success': True,
+                'data': status
+            }
+        except Exception as e:
+            return {'success': False, 'message': f'Get safety status failed: {str(e)}'}
+    
     def shutdown(self):
         """Clean shutdown of all systems"""
-        print("\n Shutting down Pi Controller...")
+        print("\n🛑 Shutting down Pi Controller...")
+        
+        # Stop safety monitoring
+        if self.safety_manager:
+            print("   Stopping safety monitoring...")
+            self.safety_manager.stop_monitoring()
         
         # Stop camera
         if camera_active:
@@ -508,7 +872,7 @@ class PiController:
             self.pixhawk.disconnect()
         
         self.is_running = False
-        print(" Shutdown complete")
+        print("✅ Shutdown complete")
 
 # Initialize controller
 controller = PiController()
@@ -597,6 +961,188 @@ def handle_reconnect_pixhawk(data):
     sio.emit('pixhawk_status', {
         'pi_id': PI_ID,
         'status': result,
+        'timestamp': datetime.now().isoformat()
+    })
+
+# ============ MAVLINK COMMAND HANDLERS ============
+
+@sio.on('drone_arm')
+def handle_drone_arm(data):
+    """ARM the drone"""
+    args = data.get('args', {})
+    result = controller.arm_vehicle(args)
+    sio.emit('drone_command_result', {
+        'pi_id': PI_ID,
+        'command': 'arm',
+        'result': result,
+        'timestamp': datetime.now().isoformat()
+    })
+
+@sio.on('drone_disarm')
+def handle_drone_disarm(data):
+    """DISARM the drone"""
+    args = data.get('args', {})
+    result = controller.disarm_vehicle(args)
+    sio.emit('drone_command_result', {
+        'pi_id': PI_ID,
+        'command': 'disarm',
+        'result': result,
+        'timestamp': datetime.now().isoformat()
+    })
+
+@sio.on('drone_set_mode')
+def handle_drone_set_mode(data):
+    """Change flight mode"""
+    args = data.get('args', {})
+    result = controller.set_flight_mode(args)
+    sio.emit('drone_command_result', {
+        'pi_id': PI_ID,
+        'command': 'set_mode',
+        'result': result,
+        'timestamp': datetime.now().isoformat()
+    })
+
+@sio.on('drone_takeoff')
+def handle_drone_takeoff(data):
+    """Takeoff to specified altitude"""
+    args = data.get('args', {})
+    result = controller.takeoff_vehicle(args)
+    sio.emit('drone_command_result', {
+        'pi_id': PI_ID,
+        'command': 'takeoff',
+        'result': result,
+        'timestamp': datetime.now().isoformat()
+    })
+
+@sio.on('drone_land')
+def handle_drone_land(data):
+    """Land the drone"""
+    args = data.get('args', {})
+    result = controller.land_vehicle(args)
+    sio.emit('drone_command_result', {
+        'pi_id': PI_ID,
+        'command': 'land',
+        'result': result,
+        'timestamp': datetime.now().isoformat()
+    })
+
+@sio.on('drone_goto')
+def handle_drone_goto(data):
+    """Navigate to GPS location"""
+    args = data.get('args', {})
+    result = controller.goto_location(args)
+    sio.emit('drone_command_result', {
+        'pi_id': PI_ID,
+        'command': 'goto',
+        'result': result,
+        'timestamp': datetime.now().isoformat()
+    })
+
+@sio.on('drone_upload_mission')
+def handle_drone_upload_mission(data):
+    """Upload multi-waypoint mission"""
+    args = data.get('args', {})
+    result = controller.upload_mission(args)
+    sio.emit('drone_command_result', {
+        'pi_id': PI_ID,
+        'command': 'upload_mission',
+        'result': result,
+        'timestamp': datetime.now().isoformat()
+    })
+
+@sio.on('drone_start_mission')
+def handle_drone_start_mission(data):
+    """Start mission execution"""
+    result = controller.start_mission()
+    sio.emit('drone_command_result', {
+        'pi_id': PI_ID,
+        'command': 'start_mission',
+        'result': result,
+        'timestamp': datetime.now().isoformat()
+    })
+
+@sio.on('drone_clear_mission')
+def handle_drone_clear_mission(data):
+    """Clear mission"""
+    result = controller.clear_mission()
+    sio.emit('drone_command_result', {
+        'pi_id': PI_ID,
+        'command': 'clear_mission',
+        'result': result,
+        'timestamp': datetime.now().isoformat()
+    })
+
+@sio.on('drone_rtl')
+def handle_drone_rtl(data):
+    """Return to launch"""
+    result = controller.return_to_launch()
+    sio.emit('drone_command_result', {
+        'pi_id': PI_ID,
+        'command': 'rtl',
+        'result': result,
+        'timestamp': datetime.now().isoformat()
+    })
+
+@sio.on('drone_emergency_stop')
+def handle_drone_emergency_stop(data):
+    """Emergency stop"""
+    result = controller.emergency_stop()
+    sio.emit('drone_command_result', {
+        'pi_id': PI_ID,
+        'command': 'emergency_stop',
+        'result': result,
+        'timestamp': datetime.now().isoformat()
+    })
+
+@sio.on('drone_get_status')
+def handle_drone_get_status(data):
+    """Get drone command status"""
+    if controller.commander:
+        status = controller.commander.get_status()
+        sio.emit('drone_status', {
+            'pi_id': PI_ID,
+            'status': status,
+            'timestamp': datetime.now().isoformat()
+        })
+    else:
+        sio.emit('drone_status', {
+            'pi_id': PI_ID,
+            'error': 'Commander not available',
+            'timestamp': datetime.now().isoformat()
+        })
+
+# ============ SAFETY COMMAND HANDLERS ============
+
+@sio.on('safety_set_geofence')
+def handle_safety_set_geofence(data):
+    """Set geofence center"""
+    args = data.get('args', {})
+    result = controller.set_geofence(args)
+    sio.emit('safety_command_result', {
+        'pi_id': PI_ID,
+        'command': 'set_geofence',
+        'result': result,
+        'timestamp': datetime.now().isoformat()
+    })
+
+@sio.on('safety_check_pre_flight')
+def handle_safety_check_pre_flight(data):
+    """Run pre-flight checklist"""
+    result = controller.check_pre_flight()
+    sio.emit('safety_command_result', {
+        'pi_id': PI_ID,
+        'command': 'check_pre_flight',
+        'result': result,
+        'timestamp': datetime.now().isoformat()
+    })
+
+@sio.on('safety_get_status')
+def handle_safety_get_status(data):
+    """Get safety status"""
+    result = controller.get_safety_status()
+    sio.emit('safety_status', {
+        'pi_id': PI_ID,
+        'status': result.get('data', {}),
         'timestamp': datetime.now().isoformat()
     })
 

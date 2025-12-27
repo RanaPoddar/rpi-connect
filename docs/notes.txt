@@ -23,3 +23,40 @@ MAV_0_CONFIG = 1
 
 
 baud=921600
+
+=================================================
+|
+|              PHASE 2
+|
+=================================================
+Automatic Initialization - Commander auto-starts when Pixhawk connects
+
+13 New Command Methods in PiController:
+
+arm_vehicle()
+disarm_vehicle()
+set_flight_mode()
+takeoff_vehicle()
+land_vehicle()
+goto_location()
+upload_mission()
+start_mission()
+clear_mission()
+get_mission_progress()
+return_to_launch()
+emergency_stop()
+11 New Socket.IO Event Handlers:
+
+drone_arm - ARM the drone
+drone_disarm - DISARM the drone
+drone_set_mode - Change flight mode
+drone_takeoff - Takeoff to altitude
+drone_land - Land the drone
+drone_goto - Navigate to GPS location
+drone_upload_mission - Upload multi-waypoint mission
+drone_start_mission - Execute mission
+drone_clear_mission - Clear mission
+drone_rtl - Return to launch
+drone_emergency_stop - Emergency stop
+drone_get_status - Get drone status
+Backward Compatibility - Still works via execute_command event
