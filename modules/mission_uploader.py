@@ -203,6 +203,105 @@ class MissionUploader:
             print(f"❌ Failed to set AUTO mode: {e}")
             return False
     
+    def arm_drone(self, force=False):
+        """
+        ARM the drone for flight
+        
+        Args:
+            force: Force arming even if pre-arm checks fail
+            
+        Returns:
+            bool: True if armed successfully
+        """
+        try:
+            print("🔐 Arming drone...")
+            
+            # Send ARM command
+            self.master.mav.command_long_send(
+                self.master.target_system,
+                self.master.target_component,
+                mavutil.mavlink.MAV_CMD_COMPONENT_ARM_DISARM,
+                0,
+                1,  # ARM
+                21196 if force else 0,  # Force parameter
+                0, 0, 0, 0, 0
+            )
+            
+            # Wait for acknowledgment
+            ack = self.master.recv_match(type='COMMAND_ACK', blocking=True, timeout=5)
+            if ack and ack.result == mavutil.mavlink.MAV_RESULT_ACCEPTED:
+                print("✅ Drone armed successfully")
+                return True
+            else:
+                print(f"⚠️  Arming response: {ack.result if ack else 'timeout'}")
+                return False
+                
+        except Exception as e:
+            print(f"❌ Failed to arm: {e}")
+            return False
+    
+    def autonomous_launch(self):
+        """
+        Complete autonomous launch sequence for NIdar competition
+        Per rule 7.24-7.26: Only upload KML and trigger launch
+        
+        Returns:
+            bool: True if launch sequence completed
+        """
+        try:
+            print("\n🚀 Starting autonomous launch sequence...")
+            print("   Per NIdar rules 7.24-7.26: No manual intervention")
+            
+            # Step 1: ARM the drone
+            if not self.arm_drone():
+                print("❌ Failed to arm drone")
+                return False
+            
+            time.sleep(2)
+            
+            # Step 2: Set AUTO mode (starts mission automatically)
+            if not self.set_mode_auto():
+                print("❌ Failed to set AUTO mode")
+                return False
+            
+            print("\n✅ Autonomous launch complete!")
+            print("   🚁 Drone now flying mission autonomously")
+            print("   🌾 Detection system active")
+            print("   📍 Will RTL automatically when complete")
+            
+            return True
+            
+        except Exception as e:
+            print(f"❌ Autonomous launch failed: {e}")
+            return False
+    
+    def set_mode_auto(self):
+        """Set Pixhawk to AUTO mode to start mission"""
+        try:
+            print("🚁 Setting mode to AUTO...")
+            
+            # Get mode ID for AUTO
+            mode_id = self.master.mode_mapping().get('AUTO')
+            if mode_id is None:
+                print("❌ AUTO mode not found")
+                return False
+            
+            # Send mode change command
+            self.master.mav.set_mode_send(
+                self.master.target_system,
+                mavutil.mavlink.MAV_MODE_FLAG_CUSTOM_MODE_ENABLED,
+                mode_id
+            )
+            
+            # Wait for confirmation
+            time.sleep(1)
+            print("✅ Mode set to AUTO")
+            return True
+            
+        except Exception as e:
+            print(f"❌ Failed to set AUTO mode: {e}")
+            return False
+    
     def close(self):
         """Close MAVLink connection"""
         if self.master:

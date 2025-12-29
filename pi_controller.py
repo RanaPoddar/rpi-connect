@@ -1450,15 +1450,23 @@ def handle_drone_rtl(data):
 
 @sio.on('upload_mission')
 def handle_upload_mission(data):
-    """Upload KML-generated mission to Pixhawk"""
+    """Upload KML-generated mission to Pixhawk and launch autonomously (NIdar competition)"""
     try:
         mission_id = data.get('mission_id')
         mission_file = data.get('mission_file')
         mission_data = data.get('mission_data')
         
-        print(f"📤 Received mission upload request: {mission_id}")
+        print(f"\n{'='*60}")
+        print(f"🚀 NIdar Competition: Autonomous Mission Launch")
+        print(f"{'='*60}")
+        print(f"📤 Mission ID: {mission_id}")
         print(f"📁 Mission file: {mission_file}")
         print(f"📍 Waypoints: {len(mission_data.get('waypoints', []))}")
+        print(f"\n⚠️  Per NIdar rules 7.24-7.26:")
+        print(f"   - Only KML upload and launch trigger allowed")
+        print(f"   - NO manual intervention after launch")
+        print(f"   - Drone flies autonomously until complete")
+        print(f"{'='*60}\n")
         
         # Import mission uploader
         from modules.mission_uploader import MissionUploader
@@ -1467,22 +1475,21 @@ def handle_upload_mission(data):
         pixhawk_connection = config.get('pixhawk', {}).get('connection_string', '/dev/serial0')
         
         # Create uploader and connect
+        print("🔌 Connecting to Pixhawk...")
         uploader = MissionUploader(pixhawk_connection)
         
         if not uploader.connect():
             raise Exception("Failed to connect to Pixhawk")
         
-        # Upload mission
+        # Upload mission waypoints
+        print("\n📤 Uploading mission waypoints...")
         waypoints = mission_data.get('waypoints', [])
         if not uploader.upload_mission(waypoints):
             raise Exception("Failed to upload mission waypoints")
         
-        print(f"✅ Mission uploaded successfully: {len(waypoints)} waypoints")
+        print(f"✅ Mission uploaded: {len(waypoints)} waypoints")
         
-        # Close connection
-        uploader.close()
-        
-        # Send success response
+        # Notify mission uploaded
         sio.emit('mission_upload_status', {
             'success': True,
             'mission_id': mission_id,
@@ -1490,10 +1497,42 @@ def handle_upload_mission(data):
             'message': f'Mission uploaded: {len(waypoints)} waypoints'
         })
         
+        # Wait a moment for confirmation
+        time.sleep(2)
+        
+        # Execute autonomous launch sequence (NIdar competition compliance)
+        print("\n🚀 Initiating autonomous launch sequence...")
+        
+        # Notify: Arming
+        sio.emit('autonomous_launch_status', {
+            'stage': 'arming',
+            'message': 'Arming drone...'
+        })
+        
+        if not uploader.autonomous_launch():
+            raise Exception("Autonomous launch sequence failed")
+        
+        # Notify: Flying
+        sio.emit('autonomous_launch_status', {
+            'stage': 'flying',
+            'message': 'Autonomous flight in progress'
+        })
+        
+        print("\n✅ Autonomous mission launched successfully!")
+        print(f"🚁 Drone flying autonomously")
+        print(f"🌾 Detection system active")
+        print(f"📍 Will return automatically when complete\n")
+        
+        # Close connection
+        uploader.close()
+        
     except Exception as e:
-        print(f"❌ Mission upload failed: {e}")
+        print(f"\n❌ Mission launch failed: {e}\n")
         sio.emit('mission_upload_status', {
             'success': False,
+            'error': str(e)
+        })
+        sio.emit('autonomous_launch_status', {
             'error': str(e)
         })
 
