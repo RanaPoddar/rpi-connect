@@ -3,9 +3,27 @@
   "pi_id": "detection_drone_pi_pushpak",
   "camera": {
     "enabled": true,
-    "resolution": [1920, 1080],
-    "framerate": 30,
-    "quality": 85
+    "resolution": [4056, 3040],
+    "framerate": 15,
+    "quality": 85,
+    "note": "Raspberry Pi HQ Camera + 6mm lens"
+  },
+  "detection": {
+    "enabled": true,
+    "yellow_hsv_lower": [18, 80, 80],
+    "yellow_hsv_upper": [35, 255, 255],
+    "min_contour_area": 500,
+    "confidence_threshold": 0.7,
+    "detection_cooldown": 3.0,
+    "auto_detect_in_auto_mode": true,
+    "save_detection_images": true
+  },
+  "periodic_capture": {
+    "enabled": true,
+    "interval_seconds": 2.0,
+    "quality": 85,
+    "send_to_server": true,
+    "note": "Captures full-resolution images at regular intervals during mission"
   },
   "pixhawk": {
     "enabled": true,

@@ -50,6 +50,19 @@ except ImportError as e:
     SAFETY_MANAGER_AVAILABLE = False
     SafetyManager = None
 
+# Import Yellow Crop Detector module
+try:
+    from modules.yellow_crop_detector import YellowCropDetector, CropDetection
+    from modules.geolocation import GeoLocationCalculator
+    import cv2
+    DETECTOR_AVAILABLE = True
+except ImportError as e:
+    print(f"⚠️  Yellow Crop Detector module not available: {e}")
+    DETECTOR_AVAILABLE = False
+    YellowCropDetector = None
+    CropDetection = None
+    GeoLocationCalculator = None
+
 # Load configuration from config.json
 def load_config():
     try:
@@ -84,7 +97,47 @@ class PiController:
         self.pixhawk = None
         self.commander = None
         self.safety_manager = None
+        self.detector = None
         self.pixhawk_enabled = PIXHAWK_ENABLED and PIXHAWK_MODULE_AVAILABLE
+        
+        # Mission Management
+        self.current_mission_id = None
+        self.mission_active = False
+        
+        # Detection state
+        self.detection_enabled = config.get('detection', {}).get('enabled', False)
+        self.detection_active = False
+        self.last_detection_time = 0
+        self.detection_cooldown = config.get('detection', {}).get('detection_cooldown', 3.0)
+        self.detection_count = 0
+        
+        # Periodic image capture
+        self.periodic_capture_config = config.get('periodic_capture', {})
+        self.periodic_capture_enabled = self.periodic_capture_config.get('enabled', False)
+        self.periodic_capture_interval = self.periodic_capture_config.get('interval_seconds', 2.0)
+        self.periodic_capture_active = False
+        self.periodic_capture_count = 0
+        self.periodic_capture_thread = None
+        self.last_periodic_capture_time = 0
+        
+        # Initialize GeoLocation Calculator
+        self.geo_calculator = None
+        if DETECTOR_AVAILABLE and GeoLocationCalculator:
+            try:
+                self.geo_calculator = GeoLocationCalculator()
+                print("📍 GeoLocation Calculator initialized")
+            except Exception as e:
+                print(f"⚠️  GeoLocation Calculator init failed: {e}")
+        
+        # Initialize Yellow Crop Detector if available
+        if DETECTOR_AVAILABLE and self.detection_enabled:
+            print("🌾 Initializing Yellow Crop Detector...")
+            try:
+                self.detector = YellowCropDetector(config=config)
+                print("✅ Yellow Crop Detector initialized")
+            except Exception as e:
+                print(f"❌ Failed to initialize detector: {e}")
+                self.detector = None
         
         # Initialize Pixhawk telemetry if enabled
         if self.pixhawk_enabled:
@@ -220,6 +273,128 @@ class PiController:
                     print(f"   Emergency LAND executed: {result.get('success', False)}")
             except Exception as e:
                 print(f"   ❌ Failed to execute safety action: {e}")
+    
+    def _process_detections(self, detections: list, frame: np.ndarray):
+        """Process detections and send to server"""
+        if not detections or not sio.connected:
+            return
+        
+        # Skip if no active mission
+        if not self.mission_active or not self.current_mission_id:
+            print("⚠️  Detection skipped - no active mission")
+            return
+        
+        try:
+            # Get current GPS coordinates
+            telemetry = self.pixhawk.get_telemetry() if self.pixhawk else {}
+            timestamp = datetime.now().isoformat()
+            
+            for detection in detections:
+                # Generate unique detection ID with mission prefix
+                self.detection_count += 1
+                unique_id = f"{self.current_mission_id}_det_{self.detection_count:04d}_{int(time.time())}"
+                detection.detection_id = unique_id
+                
+                # Calculate accurate ground GPS coordinates using photogrammetry
+                if self.geo_calculator and telemetry.get('latitude') and telemetry.get('longitude'):
+                    try:
+                        # Get drone telemetry
+                        drone_lat = telemetry.get('latitude', 0.0)
+                        drone_lon = telemetry.get('longitude', 0.0)
+                        altitude_agl = telemetry.get('altitude', 0.0)  # Altitude above ground
+                        heading_deg = telemetry.get('heading', 0.0)
+                        pitch_deg = telemetry.get('pitch', 0.0) if telemetry.get('pitch') is not None else 0.0
+                        roll_deg = telemetry.get('roll', 0.0) if telemetry.get('roll') is not None else 0.0
+                        
+                        # Convert pixel coordinates to ground GPS using photogrammetry
+                        ground_lat, ground_lon = self.geo_calculator.pixel_to_gps(
+                            pixel_x=detection.centroid[0],
+                            pixel_y=detection.centroid[1],
+                            drone_lat=drone_lat,
+                            drone_lon=drone_lon,
+                            altitude_agl=altitude_agl,
+                            heading_deg=heading_deg,
+                            pitch_deg=pitch_deg,
+                            roll_deg=roll_deg
+                        )
+                        
+                        detection.latitude = ground_lat
+                        detection.longitude = ground_lon
+                        detection.altitude = 0.0  # Ground level
+                        
+                        print(f"📍 [{self.current_mission_id}] Photogrammetry: Pixel({detection.centroid[0]:.0f},{detection.centroid[1]:.0f}) "
+                              f"→ GPS({ground_lat:.7f},{ground_lon:.7f}) | "
+                              f"Alt:{altitude_agl:.1f}m, Hdg:{heading_deg:.1f}°")
+                        
+                    except Exception as e:
+                        print(f"⚠️  Photogrammetry calculation failed: {e}, using drone GPS")
+                        detection.latitude = telemetry.get('latitude', 0.0)
+                        detection.longitude = telemetry.get('longitude', 0.0)
+                        detection.altitude = telemetry.get('altitude', 0.0)
+                else:
+                    # Fallback to drone GPS if photogrammetry unavailable
+                    detection.latitude = telemetry.get('latitude', 0.0)
+                    detection.longitude = telemetry.get('longitude', 0.0)
+                    detection.altitude = telemetry.get('altitude', 0.0)
+                
+                # Extract detection region from frame
+                x, y, w, h = detection.bbox
+                detection_image = frame[y:y+h, x:x+w]
+                
+                # Encode detection image
+                import cv2
+                _, buffer = cv2.imencode('.jpg', detection_image, [cv2.IMWRITE_JPEG_QUALITY, 85])
+                image_data = base64.b64encode(buffer).decode('utf-8')
+                
+                # Prepare detection data
+                detection_data = detection.to_dict()
+                detection_data.update({
+                    'detection_id': unique_id,
+                    'mission_id': self.current_mission_id,
+                    'pi_id': PI_ID,
+                    'timestamp': timestamp,
+                    'image': image_data,
+                    'drone_mode': telemetry.get('mode', 'UNKNOWN'),
+                    'simulation': telemetry.get('simulation', False),
+                    'heading': telemetry.get('heading'),
+                    'ground_speed': telemetry.get('groundspeed')
+                })
+                
+                # Send to server
+                sio.emit('crop_detection', detection_data)
+                print(f"   📤 [{self.current_mission_id}] Detection {self.detection_count:04d} sent: {unique_id}")
+                
+                # Optional: Save locally
+                if config.get('detection', {}).get('save_detection_images', False):
+                    self._save_detection_locally(detection, frame)
+                
+        except Exception as e:
+            print(f"❌ Error processing detections: {e}")
+    
+    def _save_detection_locally(self, detection: CropDetection, frame: np.ndarray):
+        """Save detection image locally"""
+        try:
+            import cv2
+            import os
+            
+            # Create detections directory
+            det_dir = os.path.join(os.path.dirname(__file__), 'detected_crops')
+            os.makedirs(det_dir, exist_ok=True)
+            
+            # Save detection image with bounding box
+            viz_frame = self.detector.visualize_detections(frame.copy(), [detection])
+            filename = f"{detection.detection_id}.jpg"
+            filepath = os.path.join(det_dir, filename)
+            cv2.imwrite(filepath, viz_frame)
+            
+            # Save metadata
+            import json
+            metadata_file = os.path.join(det_dir, f"{detection.detection_id}.json")
+            with open(metadata_file, 'w') as f:
+                json.dump(detection.to_dict(), f, indent=2)
+                
+        except Exception as e:
+            print(f"Failed to save detection locally: {e}")
     
     def get_pixhawk_status(self):
         """Get Pixhawk connection status and current telemetry"""
@@ -492,6 +667,10 @@ class PiController:
                 # Start streaming thread
                 Thread(target=self._stream_frames, daemon=True).start()
                 
+                # Start periodic capture if enabled and mission active
+                if self.periodic_capture_enabled and self.mission_active:
+                    self.start_periodic_capture()
+                
                 return {'success': True, 'message': 'Streaming started'}
             except Exception as e:
                 camera_active = False
@@ -514,10 +693,100 @@ class PiController:
                 self.camera = None
             camera_active = False
         
+        # Stop periodic capture if active
+        if self.periodic_capture_active:
+            self.stop_periodic_capture()
+        
         return {'success': True, 'message': 'Streaming stopped'}
     
+    def start_periodic_capture(self):
+        """Start periodic image capture thread"""
+        if self.periodic_capture_active:
+            return {'success': False, 'message': 'Periodic capture already active'}
+        
+        if not self.mission_active:
+            return {'success': False, 'message': 'No active mission'}
+        
+        self.periodic_capture_active = True
+        self.periodic_capture_thread = Thread(target=self._periodic_capture_loop, daemon=True)
+        self.periodic_capture_thread.start()
+        print(f"📸 Periodic capture started: {self.periodic_capture_interval}s interval")
+        return {'success': True, 'message': 'Periodic capture started'}
+    
+    def stop_periodic_capture(self):
+        """Stop periodic image capture"""
+        self.periodic_capture_active = False
+        if self.periodic_capture_thread:
+            self.periodic_capture_thread.join(timeout=2.0)
+        print("📸 Periodic capture stopped")
+        return {'success': True, 'message': 'Periodic capture stopped'}
+    
+    def _periodic_capture_loop(self):
+        """Thread loop for periodic image capture"""
+        import cv2
+        
+        while self.periodic_capture_active and self.mission_active and self.is_running:
+            try:
+                current_time = time.time()
+                
+                # Check if enough time has passed
+                if current_time - self.last_periodic_capture_time < self.periodic_capture_interval:
+                    time.sleep(0.1)
+                    continue
+                
+                # Capture frame from camera
+                if self.camera:
+                    frame = self.camera.capture_array()
+                    
+                    # Convert RGB to BGR for OpenCV
+                    if len(frame.shape) == 3 and frame.shape[2] == 3:
+                        frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+                    else:
+                        frame_bgr = frame
+                    
+                    # Get telemetry
+                    telemetry = self.pixhawk.get_telemetry() if self.pixhawk else {}
+                    timestamp = datetime.now().isoformat()
+                    
+                    # Generate unique image ID
+                    self.periodic_capture_count += 1
+                    image_id = f"{self.current_mission_id}_img_{self.periodic_capture_count:04d}_{int(time.time())}"
+                    
+                    # Encode image
+                    quality = self.periodic_capture_config.get('quality', 85)
+                    _, buffer = cv2.imencode('.jpg', frame_bgr, [cv2.IMWRITE_JPEG_QUALITY, quality])
+                    image_data = base64.b64encode(buffer).decode('utf-8')
+                    
+                    # Prepare image data packet
+                    image_packet = {
+                        'image_id': image_id,
+                        'mission_id': self.current_mission_id,
+                        'pi_id': PI_ID,
+                        'timestamp': timestamp,
+                        'image': image_data,
+                        'image_type': 'periodic',
+                        'latitude': telemetry.get('latitude', 0.0),
+                        'longitude': telemetry.get('longitude', 0.0),
+                        'altitude': telemetry.get('altitude', 0.0),
+                        'heading': telemetry.get('heading', 0.0),
+                        'mode': telemetry.get('mode', 'UNKNOWN')
+                    }
+                    
+                    # Send to server if configured
+                    if self.periodic_capture_config.get('send_to_server', True) and sio.connected:
+                        sio.emit('periodic_image', image_packet)
+                        print(f"   📷 Periodic image {self.periodic_capture_count:04d} sent")
+                    
+                    self.last_periodic_capture_time = current_time
+                    
+            except Exception as e:
+                print(f"❌ Error in periodic capture: {e}")
+                time.sleep(1.0)
+        
+        print("📸 Periodic capture loop ended")
+    
     def _stream_frames(self):
-        """Stream camera frames via Socket.IO"""
+        """Stream camera frames via Socket.IO with optional detection"""
         global streaming_active
         import cv2
         
@@ -529,8 +798,32 @@ class PiController:
                 if not streaming_active:
                     break
                 
-                # Convert RGB to BGR and encode as JPEG
+                # Convert RGB to BGR
                 frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+                
+                # Perform detection if enabled
+                if self.detection_active and self.detector:
+                    current_time = time.time()
+                    
+                    # Check cooldown
+                    if current_time - self.last_detection_time >= self.detection_cooldown:
+                        try:
+                            detections = self.detector.detect(frame_bgr)
+                            
+                            if detections:
+                                print(f"🌾 Detected {len(detections)} yellow crop(s)")
+                                self.last_detection_time = current_time
+                                self.detection_count += len(detections)
+                                
+                                # Process detections and send to server
+                                self._process_detections(detections, frame_bgr)
+                            
+                            # Visualize detections on frame
+                            frame_bgr = self.detector.visualize_detections(frame_bgr, detections)
+                        except Exception as e:
+                            print(f"Detection error: {e}")
+                
+                # Encode frame as JPEG
                 _, buffer = cv2.imencode('.jpg', frame_bgr, [cv2.IMWRITE_JPEG_QUALITY, 75])
                 frame_data = base64.b64encode(buffer).decode('utf-8')
                 
@@ -938,6 +1231,78 @@ def handle_stop_stream(data):
         'message': result['message']
     })
 
+@sio.on('start_detection')
+def handle_start_detection(data):
+    """Start yellow crop detection"""
+    if not controller.detector:
+        sio.emit('detection_status', {
+            'pi_id': PI_ID,
+            'status': 'failed',
+            'message': 'Detector not available'
+        })
+        return
+    
+    controller.detection_active = True
+    print("🌾 Detection started")
+    sio.emit('detection_status', {
+        'pi_id': PI_ID,
+        'status': 'active',
+        'message': 'Detection started'
+    })
+
+@sio.on('stop_detection')
+def handle_stop_detection(data):
+    """Stop yellow crop detection"""
+    controller.detection_active = False
+    print("🌾 Detection stopped")
+    sio.emit('detection_status', {
+        'pi_id': PI_ID,
+        'status': 'inactive',
+        'message': 'Detection stopped'
+    })
+
+@sio.on('get_detection_stats')
+def handle_get_detection_stats(data):
+    """Get detection statistics"""
+    if controller.detector:
+        stats = controller.detector.get_statistics()
+        stats['detection_count'] = controller.detection_count
+        stats['detection_active'] = controller.detection_active
+        sio.emit('detection_stats', {
+            'pi_id': PI_ID,
+            'stats': stats
+        })
+
+# ========================================
+#          Mission Management            |
+# ========================================
+
+@sio.on('mission_started')
+def handle_mission_started(data):
+    """Server notifies Pi that mission started"""
+    controller.current_mission_id = data.get('mission_id')
+    controller.mission_active = True
+    controller.detection_count = 0  # Reset detection counter
+    controller.periodic_capture_count = 0  # Reset periodic capture counter
+    print(f"🚀 Mission started: {controller.current_mission_id}")
+    
+    # Auto-start periodic capture if enabled and camera active
+    if controller.periodic_capture_enabled and controller.camera:
+        controller.start_periodic_capture()
+    
+@sio.on('mission_stopped')
+def handle_mission_stopped(data):
+    """Server notifies Pi that mission stopped"""
+    print(f"🏁 Mission stopped: {controller.current_mission_id}")
+    
+    # Stop periodic capture
+    if controller.periodic_capture_active:
+        controller.stop_periodic_capture()
+    
+    controller.current_mission_id = None
+    controller.mission_active = False
+    controller.detection_active = False  # Auto-stop detection
+
 @sio.on('ping')
 def handle_ping(data):
     """Respond to ping"""
@@ -1082,6 +1447,55 @@ def handle_drone_rtl(data):
         'result': result,
         'timestamp': datetime.now().isoformat()
     })
+
+@sio.on('upload_mission')
+def handle_upload_mission(data):
+    """Upload KML-generated mission to Pixhawk"""
+    try:
+        mission_id = data.get('mission_id')
+        mission_file = data.get('mission_file')
+        mission_data = data.get('mission_data')
+        
+        print(f"📤 Received mission upload request: {mission_id}")
+        print(f"📁 Mission file: {mission_file}")
+        print(f"📍 Waypoints: {len(mission_data.get('waypoints', []))}")
+        
+        # Import mission uploader
+        from modules.mission_uploader import MissionUploader
+        
+        # Get Pixhawk connection string
+        pixhawk_connection = config.get('pixhawk', {}).get('connection_string', '/dev/serial0')
+        
+        # Create uploader and connect
+        uploader = MissionUploader(pixhawk_connection)
+        
+        if not uploader.connect():
+            raise Exception("Failed to connect to Pixhawk")
+        
+        # Upload mission
+        waypoints = mission_data.get('waypoints', [])
+        if not uploader.upload_mission(waypoints):
+            raise Exception("Failed to upload mission waypoints")
+        
+        print(f"✅ Mission uploaded successfully: {len(waypoints)} waypoints")
+        
+        # Close connection
+        uploader.close()
+        
+        # Send success response
+        sio.emit('mission_upload_status', {
+            'success': True,
+            'mission_id': mission_id,
+            'waypoints_count': len(waypoints),
+            'message': f'Mission uploaded: {len(waypoints)} waypoints'
+        })
+        
+    except Exception as e:
+        print(f"❌ Mission upload failed: {e}")
+        sio.emit('mission_upload_status', {
+            'success': False,
+            'error': str(e)
+        })
 
 @sio.on('drone_emergency_stop')
 def handle_drone_emergency_stop(data):
