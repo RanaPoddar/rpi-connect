@@ -582,7 +582,7 @@ class MAVLinkCommander:
     def _takeoff_internal(self, altitude: float, timeout: int) -> Dict:
         """Internal takeoff implementation"""
         
-        # Validate altitude
+        # Validate altitude (for safety check )
         if altitude < 2.0:
             return {
                 'success': False,
@@ -590,10 +590,10 @@ class MAVLinkCommander:
                 'timestamp': datetime.now().isoformat()
             }
         
-        if altitude > 120.0:
+        if altitude > 100.0:
             return {
                 'success': False,
-                'message': 'Altitude exceeds maximum allowed (120m)',
+                'message': 'Altitude exceeds maximum allowed (100m)',
                 'timestamp': datetime.now().isoformat()
             }
         
@@ -615,11 +615,11 @@ class MAVLinkCommander:
                     'timestamp': datetime.now().isoformat()
                 }
             
-            print(f"🚁 [SIM] Taking off to {altitude}m...")
+            print(f" [SIM] Taking off to {altitude}m...")
             time.sleep(2)  # Simulate takeoff time
             self.sim_altitude = altitude
             self.sim_takeoff_complete = True
-            print(f"✅ [SIM] Takeoff complete - altitude: {altitude}m")
+            print(f" [SIM] Takeoff complete - altitude: {altitude}m")
             
             return {
                 'success': True,
@@ -628,7 +628,7 @@ class MAVLinkCommander:
                 'timestamp': datetime.now().isoformat()
             }
         
-        # Real vehicle
+        # Real vehicle (when we got pi connected with pixhawk (when isuue will be fixed))
         try:
             # Check if armed
             if not self.vehicle.armed:
@@ -651,7 +651,7 @@ class MAVLinkCommander:
             # Set mode to GUIDED (required for takeoff command)
             current_mode = self.vehicle.mode.name
             if current_mode != 'GUIDED':
-                print(f"🔄 Switching to GUIDED mode for takeoff...")
+                print(f"Switching to GUIDED mode for takeoff...")
                 mode_result = self.set_mode('GUIDED')
                 if not mode_result['success']:
                     return {
@@ -660,7 +660,7 @@ class MAVLinkCommander:
                         'timestamp': datetime.now().isoformat()
                     }
             
-            print(f"🚁 Taking off to {altitude} meters...")
+            print(f"Taking off to {altitude} meters...")
             self.vehicle.simple_takeoff(altitude)
             
             # Wait for takeoff to reach target altitude
@@ -676,7 +676,7 @@ class MAVLinkCommander:
                 
                 # Check if reached target altitude (within 95%)
                 if current_alt >= altitude * 0.95:
-                    print(f"\n✅ Takeoff complete - reached {current_alt:.1f}m")
+                    print(f"\n Takeoff complete - reached {current_alt:.1f}m")
                     return {
                         'success': True,
                         'message': f'Takeoff complete - reached {current_alt:.1f}m',
@@ -689,7 +689,7 @@ class MAVLinkCommander:
             
             # Timeout reached
             current_alt = self.vehicle.location.global_relative_frame.alt or 0
-            print(f"\n⚠️  Takeoff timeout - reached {current_alt:.1f}m of {altitude}m")
+            print(f"\n  Takeoff timeout - reached {current_alt:.1f}m of {altitude}m")
             return {
                 'success': False,
                 'message': f'Takeoff timeout - only reached {current_alt:.1f}m of {altitude}m target',
@@ -699,7 +699,7 @@ class MAVLinkCommander:
             }
             
         except Exception as e:
-            print(f"❌ Takeoff failed: {e}")
+            print(f" Takeoff failed: {e}")
             return {
                 'success': False,
                 'message': f'Takeoff failed: {str(e)}',
@@ -980,7 +980,7 @@ class MAVLinkCommander:
             distance = self.get_distance_meters(self.sim_lat, self.sim_lon, lat, lon)
             bearing = self.get_bearing(self.sim_lat, self.sim_lon, lat, lon)
             
-            print(f"🗺️  [SIM] Navigating to ({lat:.6f}, {lon:.6f})")
+            print(f"  [SIM] Navigating to ({lat:.6f}, {lon:.6f})")
             print(f"    Distance: {distance:.1f}m, Bearing: {bearing:.0f}°")
             time.sleep(2)  # Simulate travel time
             
@@ -1010,7 +1010,7 @@ class MAVLinkCommander:
             
             # Ensure in GUIDED mode
             if self.vehicle.mode.name != 'GUIDED':
-                print(f"🔄 Switching to GUIDED mode...")
+                print(f" Switching to GUIDED mode...")
                 mode_result = self.set_mode('GUIDED')
                 if not mode_result['success']:
                     return {
@@ -1034,7 +1034,7 @@ class MAVLinkCommander:
             )
             bearing = self.get_bearing(current_loc.lat, current_loc.lon, lat, lon)
             
-            print(f"🗺️  Navigating to ({lat:.6f}, {lon:.6f})")
+            print(f"   Navigating to ({lat:.6f}, {lon:.6f})")
             print(f"    Distance: {start_distance:.1f}m, Bearing: {bearing:.0f}°")
             
             # Set groundspeed if specified

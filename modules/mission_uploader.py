@@ -24,22 +24,22 @@ class MissionUploader:
     def connect(self):
         """Connect to Pixhawk"""
         try:
-            print(f"🔌 Connecting to Pixhawk: {self.connection_string}")
+            print(f" Connecting to Pixhawk: {self.connection_string}")
             self.master = mavutil.mavlink_connection(self.connection_string, baud=57600)
             
             # Wait for heartbeat
-            print("⏳ Waiting for heartbeat...")
+            print(" Waiting for heartbeat...")
             self.master.wait_heartbeat()
-            print(f"✅ Heartbeat received from system {self.master.target_system}")
+            print(f" Heartbeat received from system {self.master.target_system}")
             return True
         except Exception as e:
-            print(f"❌ Connection failed: {e}")
+            print(f"Connection failed: {e}")
             return False
     
     def clear_mission(self):
         """Clear existing mission from Pixhawk"""
         try:
-            print("🧹 Clearing existing mission...")
+            print("Clearing existing mission...")
             
             # Send mission clear command
             self.master.mav.mission_clear_all_send(
@@ -50,14 +50,14 @@ class MissionUploader:
             # Wait for acknowledgment
             ack = self.master.recv_match(type='MISSION_ACK', blocking=True, timeout=5)
             if ack:
-                print("✅ Mission cleared successfully")
+                print("Mission cleared successfully")
                 return True
             else:
-                print("⚠️  No acknowledgment received for mission clear")
+                print(" No acknowledgment received for mission clear")
                 return False
                 
         except Exception as e:
-            print(f"❌ Failed to clear mission: {e}")
+            print(f"Failed to clear mission: {e}")
             return False
     
     def upload_mission(self, waypoints):
@@ -72,7 +72,7 @@ class MissionUploader:
         """
         try:
             if not self.master:
-                print("❌ Not connected to Pixhawk")
+                print(" Not connected to Pixhawk")
                 return False
             
             # Clear existing mission first
@@ -81,7 +81,7 @@ class MissionUploader:
             
             # Send mission count
             mission_count = len(waypoints)
-            print(f"📤 Uploading {mission_count} waypoints...")
+            print(f" Uploading {mission_count} waypoints...")
             
             self.master.mav.mission_count_send(
                 self.master.target_system,
@@ -91,15 +91,15 @@ class MissionUploader:
             
             # Wait for mission request
             for i, wp in enumerate(waypoints):
-                print(f"  ⏳ Waiting for request for waypoint {i}...")
+                print(f" Waiting for request for waypoint {i}...")
                 
                 msg = self.master.recv_match(type='MISSION_REQUEST', blocking=True, timeout=10)
                 if not msg:
-                    print(f"❌ Timeout waiting for request for waypoint {i}")
+                    print(f" Timeout waiting for request for waypoint {i}")
                     return False
                 
                 if msg.seq != i:
-                    print(f"⚠️  Expected request for waypoint {i}, got {msg.seq}")
+                    print(f" Expected request for waypoint {i}, got {msg.seq}")
                     continue
                 
                 # Prepare waypoint command
@@ -123,7 +123,7 @@ class MissionUploader:
                     wp['alt']   # Altitude (relative)
                 )
                 
-                print(f"  ✅ Waypoint {i}: {wp['lat']:.6f}, {wp['lon']:.6f}, {wp['alt']:.1f}m")
+                print(f" Waypoint {i}: {wp['lat']:.6f}, {wp['lon']:.6f}, {wp['alt']:.1f}m")
             
             # Wait for mission ACK
             print("⏳ Waiting for mission acknowledgment...")
@@ -131,17 +131,17 @@ class MissionUploader:
             
             if ack:
                 if ack.type == mavutil.mavlink.MAV_MISSION_ACCEPTED:
-                    print("✅ Mission uploaded successfully!")
+                    print("Mission uploaded successfully!")
                     return True
                 else:
-                    print(f"❌ Mission upload failed: {ack.type}")
+                    print(f" Mission upload failed: {ack.type}")
                     return False
             else:
-                print("❌ No acknowledgment received")
+                print(" No acknowledgment received")
                 return False
                 
         except Exception as e:
-            print(f"❌ Mission upload error: {e}")
+            print(f"Mission upload error: {e}")
             return False
     
     def load_mission_from_json(self, json_file):
@@ -163,17 +163,17 @@ class MissionUploader:
             waypoints = mission_data.get('waypoints', [])
             
             if not waypoints:
-                print("❌ No waypoints found in mission file")
+                print(" No waypoints found in mission file")
                 return False
             
-            print(f"📍 Loaded {len(waypoints)} waypoints")
-            print(f"📝 Mission: {mission_data.get('metadata', {}).get('mission_name', 'Unnamed')}")
+            print(f" Loaded {len(waypoints)} waypoints")
+            print(f"Mission: {mission_data.get('metadata', {}).get('mission_name', 'Unnamed')}")
             
             # Upload to Pixhawk
             return self.upload_mission(waypoints)
             
         except Exception as e:
-            print(f"❌ Failed to load mission from JSON: {e}")
+            print(f" Failed to load mission from JSON: {e}")
             return False
     
     def set_mode_auto(self):
@@ -184,7 +184,7 @@ class MissionUploader:
             # Get mode ID for AUTO
             mode_id = self.master.mode_mapping().get('AUTO')
             if mode_id is None:
-                print("❌ AUTO mode not found")
+                print("AUTO mode not found")
                 return False
             
             # Send mode change command
@@ -196,11 +196,11 @@ class MissionUploader:
             
             # Wait for confirmation
             time.sleep(1)
-            print("✅ Mode set to AUTO")
+            print("Mode set to AUTO")
             return True
             
         except Exception as e:
-            print(f"❌ Failed to set AUTO mode: {e}")
+            print(f"Failed to set AUTO mode: {e}")
             return False
     
     def arm_drone(self, force=False):
@@ -214,7 +214,7 @@ class MissionUploader:
             bool: True if armed successfully
         """
         try:
-            print("🔐 Arming drone...")
+            print(" Arming drone...")
             
             # Send ARM command
             self.master.mav.command_long_send(

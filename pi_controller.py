@@ -1031,9 +1031,76 @@ class PiController:
         
         try:
             result = self.commander.start_mission()
+            
+            # Start mission monitoring if successful
+            if result.get('success'):
+                print("🔍 Starting mission monitoring...")
+                self._start_mission_monitoring()
+            
             return result
         except Exception as e:
-            return {'success': False, 'message': f'Mission start failed: {str(e)}'}
+            error_msg = f'Mission start failed: {str(e)}'
+            print(f"❌ {error_msg}")
+            
+            # Notify server of error
+            if sio.connected:
+                sio.emit('mission_error', {
+                    'pi_id': PI_ID,
+                    'error': error_msg,
+                    'timestamp': datetime.now().isoformat()
+                })
+            
+            return {'success': False, 'message': error_msg}
+    
+    def _start_mission_monitoring(self):
+        """Monitor mission progress and handle completion/errors"""
+        import threading
+        
+        def monitor():
+            try:
+                while self.mission_active and self.pixhawk and self.pixhawk.vehicle:
+                    # Check if mission is completed
+                    if self.commander:
+                        progress = self.commander.get_mission_progress()
+                        
+                        # Check for mission completion
+                        if not self.commander.vehicle.armed and progress.get('mode') == 'AUTO':
+                            print("✅ Mission completed - drone has landed")
+                            if sio.connected:
+                                sio.emit('mission_completed', {
+                                    'pi_id': PI_ID,
+                                    'timestamp': datetime.now().isoformat()
+                                })
+                            break
+                        
+                        # Check for errors/failsafe
+                        if self.pixhawk.vehicle:
+                            mode = str(self.pixhawk.vehicle.mode.name)
+                            if mode in ['RTL', 'LAND'] and progress.get('current_waypoint', 0) < progress.get('total_waypoints', 0):
+                                error_msg = f'Mission aborted - unexpected {mode} mode'
+                                print(f"⚠️  {error_msg}")
+                                if sio.connected:
+                                    sio.emit('mission_error', {
+                                        'pi_id': PI_ID,
+                                        'error': error_msg,
+                                        'timestamp': datetime.now().isoformat()
+                                    })
+                                break
+                    
+                    time.sleep(2)  # Check every 2 seconds
+                    
+            except Exception as e:
+                error_msg = f'Mission monitoring error: {str(e)}'
+                print(f"❌ {error_msg}")
+                if sio.connected:
+                    sio.emit('mission_error', {
+                        'pi_id': PI_ID,
+                        'error': error_msg,
+                        'timestamp': datetime.now().isoformat()
+                    })
+        
+        monitor_thread = threading.Thread(target=monitor, daemon=True)
+        monitor_thread.start()
     
     def clear_mission(self, args=None):
         """Clear the current mission"""
