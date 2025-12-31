@@ -16,7 +16,7 @@ try:
     MAVLINK_AVAILABLE = True
 except ImportError:
     MAVLINK_AVAILABLE = False
-    print("⚠️  DroneKit not available. Install with: pip install dronekit pymavlink")
+    print(" DroneKit not available. Install with: pip install dronekit pymavlink")
 
 
 class PixhawkTelemetry:

@@ -574,10 +574,10 @@ class MAVLinkCommander:
         Returns:
             dict: Command result with success status and message
         """
-        with self.command_lock:
-            result = self._takeoff_internal(altitude, timeout)
-            self._log_command(f'TAKEOFF_{altitude}m', result)
-            return result
+        # NOTE: Don't use command_lock here - it causes deadlock with set_mode()
+        result = self._takeoff_internal(altitude, timeout)
+        self._log_command(f'TAKEOFF_{altitude}m', result)
+        return result
     
     def _takeoff_internal(self, altitude: float, timeout: int) -> Dict:
         """Internal takeoff implementation"""
@@ -663,38 +663,20 @@ class MAVLinkCommander:
             print(f"Taking off to {altitude} meters...")
             self.vehicle.simple_takeoff(altitude)
             
-            # Wait for takeoff to reach target altitude
-            start_time = time.time()
-            while time.time() - start_time < timeout:
-                current_alt = self.vehicle.location.global_relative_frame.alt
-                
-                if current_alt is None:
-                    time.sleep(0.5)
-                    continue
-                
-                print(f"   Altitude: {current_alt:.1f}m / {altitude}m", end='\r')
-                
-                # Check if reached target altitude (within 95%)
-                if current_alt >= altitude * 0.95:
-                    print(f"\n Takeoff complete - reached {current_alt:.1f}m")
-                    return {
-                        'success': True,
-                        'message': f'Takeoff complete - reached {current_alt:.1f}m',
-                        'target_altitude': altitude,
-                        'actual_altitude': current_alt,
-                        'timestamp': datetime.now().isoformat()
-                    }
-                
-                time.sleep(0.5)
+            # Start non-blocking altitude monitoring in separate thread
+            monitor_thread = threading.Thread(
+                target=self._monitor_takeoff_altitude,
+                args=(altitude, timeout),
+                daemon=True
+            )
+            monitor_thread.start()
             
-            # Timeout reached
-            current_alt = self.vehicle.location.global_relative_frame.alt or 0
-            print(f"\n  Takeoff timeout - reached {current_alt:.1f}m of {altitude}m")
+            # Return immediately - don't block dashboard
             return {
-                'success': False,
-                'message': f'Takeoff timeout - only reached {current_alt:.1f}m of {altitude}m target',
+                'success': True,
+                'message': f'Takeoff command sent. Ascending to {altitude}m...',
                 'target_altitude': altitude,
-                'actual_altitude': current_alt,
+                'async': True,
                 'timestamp': datetime.now().isoformat()
             }
             
@@ -706,6 +688,44 @@ class MAVLinkCommander:
                 'timestamp': datetime.now().isoformat()
             }
     
+    def _monitor_takeoff_altitude(self, target_altitude: float, timeout: int):
+        """Monitor altitude during takeoff (runs in background thread)"""
+        start_time = time.time()
+        last_update = start_time
+        
+        try:
+            while time.time() - start_time < timeout:
+                if not self.vehicle or not self.vehicle.armed:
+                    print("  Vehicle disarmed during takeoff")
+                    return
+                
+                loc = self.vehicle.location.global_relative_frame
+                if not loc or loc.alt is None:
+                    time.sleep(0.5)
+                    continue
+                
+                current_alt = loc.alt
+                elapsed = time.time() - start_time
+                
+                # Print progress every 2 seconds to avoid spam
+                if elapsed - (last_update - start_time) >= 2.0:
+                    print(f"   [TAKEOFF] Alt: {current_alt:.1f}m / {target_altitude}m (elapsed: {elapsed:.0f}s)")
+                    last_update = time.time()
+                
+                # Check if reached target altitude (within 95%)
+                if current_alt >= target_altitude * 0.95:
+                    print(f" TAKEOFF COMPLETE - Reached {current_alt:.1f}m altitude")
+                    return
+                
+                time.sleep(0.5)
+            
+            # Timeout reached
+            current_alt = self.vehicle.location.global_relative_frame.alt if self.vehicle else 0
+            print(f"  TAKEOFF TIMEOUT - Only reached {current_alt:.1f}m of {target_altitude}m")
+            
+        except Exception as e:
+            print(f" Altitude monitoring error: {e}")
+    
     def land(self, timeout: int = 60) -> Dict:
         """
         Initiate landing sequence
@@ -716,10 +736,10 @@ class MAVLinkCommander:
         Returns:
             dict: Command result with success status and message
         """
-        with self.command_lock:
-            result = self._land_internal(timeout)
-            self._log_command('LAND', result)
-            return result
+        # NOTE: Don't use command_lock here - would block other commands
+        result = self._land_internal(timeout)
+        self._log_command('LAND', result)
+        return result
     
     def _land_internal(self, timeout: int) -> Dict:
         """Internal landing implementation"""
@@ -742,12 +762,12 @@ class MAVLinkCommander:
                     'timestamp': datetime.now().isoformat()
                 }
             
-            print(f"🛬 [SIM] Landing...")
+            print(f" [SIM] Landing...")
             time.sleep(2)  # Simulate landing time
             self.sim_altitude = 0.0
             self.sim_armed = False
             self.sim_takeoff_complete = False
-            print(f"✅ [SIM] Landing complete")
+            print(f" [SIM] Landing complete")
             
             return {
                 'success': True,
@@ -766,7 +786,7 @@ class MAVLinkCommander:
                 }
             
             # Set mode to LAND
-            print(f"🛬 Initiating landing sequence...")
+            print(f" Initiating landing sequence...")
             mode_result = self.set_mode('LAND')
             if not mode_result['success']:
                 return {
@@ -775,63 +795,72 @@ class MAVLinkCommander:
                     'timestamp': datetime.now().isoformat()
                 }
             
-            # Wait for landing to complete
-            start_time = time.time()
-            while time.time() - start_time < timeout:
-                current_alt = self.vehicle.location.global_relative_frame.alt
-                armed = self.vehicle.armed
-                
-                if current_alt is not None:
-                    print(f"   Altitude: {current_alt:.1f}m, Armed: {armed}", end='\r')
-                
-                # Check if landed (disarmed automatically)
-                if not armed:
-                    print(f"\n✅ Landing complete - vehicle disarmed")
-                    return {
-                        'success': True,
-                        'message': 'Landing complete - vehicle disarmed',
-                        'timestamp': datetime.now().isoformat()
-                    }
-                
-                # Check if very close to ground
-                if current_alt is not None and current_alt < 0.5:
-                    print(f"\n✅ Landing complete - on ground")
-                    return {
-                        'success': True,
-                        'message': 'Landing complete - on ground',
-                        'timestamp': datetime.now().isoformat()
-                    }
-                
-                time.sleep(0.5)
+            # Start non-blocking landing monitor in separate thread
+            monitor_thread = threading.Thread(
+                target=self._monitor_landing,
+                args=(timeout,),
+                daemon=True
+            )
+            monitor_thread.start()
             
-            # Timeout reached but may still be landing
-            current_alt = self.vehicle.location.global_relative_frame.alt or 0
-            armed = self.vehicle.armed
-            
-            if not armed or current_alt < 0.5:
-                print(f"\n✅ Landing complete")
-                return {
-                    'success': True,
-                    'message': 'Landing complete',
-                    'timestamp': datetime.now().isoformat()
-                }
-            
-            print(f"\n⚠️  Landing timeout - still at {current_alt:.1f}m")
+            # Return immediately - don't block dashboard
             return {
-                'success': False,
-                'message': f'Landing timeout - still at {current_alt:.1f}m',
-                'altitude': current_alt,
-                'armed': armed,
+                'success': True,
+                'message': 'Landing command sent...',
+                'async': True,
                 'timestamp': datetime.now().isoformat()
             }
             
         except Exception as e:
-            print(f"❌ Landing failed: {e}")
+            print(f"Landing failed: {e}")
             return {
                 'success': False,
                 'message': f'Landing failed: {str(e)}',
                 'timestamp': datetime.now().isoformat()
             }
+    
+    def _monitor_landing(self, timeout: int):
+        """Monitor landing sequence (runs in background thread)"""
+        start_time = time.time()
+        last_update = start_time
+        
+        try:
+            while time.time() - start_time < timeout:
+                if not self.vehicle:
+                    print("  Vehicle disconnected during landing")
+                    return
+                
+                loc = self.vehicle.location.global_relative_frame
+                armed = self.vehicle.armed
+                current_alt = loc.alt if loc else None
+                elapsed = time.time() - start_time
+                
+                # Check if landed (disarmed automatically)
+                if not armed:
+                    print(f" LANDING COMPLETE - Vehicle disarmed at {elapsed:.0f}s")
+                    return
+                
+                # Check if very close to ground
+                if current_alt is not None and current_alt < 0.5:
+                    print(f" LANDING COMPLETE - On ground at {elapsed:.0f}s")
+                    return
+                
+                # Print progress every 3 seconds
+                if elapsed - (last_update - start_time) >= 3.0:
+                    alt_str = f"{current_alt:.1f}m" if current_alt is not None else "N/A"
+                    print(f"   [LANDING] Alt: {alt_str}, Armed: {armed} (elapsed: {elapsed:.0f}s)")
+                    last_update = time.time()
+                
+                time.sleep(0.5)
+            
+            # Timeout reached
+            current_alt = self.vehicle.location.global_relative_frame.alt if self.vehicle else None
+            armed = self.vehicle.armed if self.vehicle else False
+            alt_str = f"{current_alt:.1f}m" if current_alt is not None else "N/A"
+            print(f" LANDING TIMEOUT - Alt: {alt_str}, Armed: {armed}")
+            
+        except Exception as e:
+            print(f" Landing monitoring error: {e}")
     
     def get_altitude(self) -> Dict:
         """
@@ -934,15 +963,14 @@ class MAVLinkCommander:
         Returns:
             dict: Command result with success status and message
         """
-        with self.command_lock:
-            result = self._goto_location_internal(lat, lon, altitude, groundspeed, timeout)
-            self._log_command(f'GOTO_({lat:.6f},{lon:.6f})', result)
-            return result
+        # NOTE: Don't use command_lock here - to avoid blocking UI
+        result = self._goto_location_internal(lat, lon, altitude, groundspeed, timeout)
+        self._log_command(f'GOTO_({lat:.6f},{lon:.6f})', result)
+        return result
     
     def _goto_location_internal(self, lat: float, lon: float, altitude: float, 
                                 groundspeed: float, timeout: int) -> Dict:
-        """Internal goto location implementation"""
-        
+        """Internal goto location implementation (non-blocking)"""
         # Validate coordinates
         if not (-90 <= lat <= 90):
             return {
@@ -950,15 +978,12 @@ class MAVLinkCommander:
                 'message': f'Invalid latitude: {lat} (must be -90 to 90)',
                 'timestamp': datetime.now().isoformat()
             }
-        
         if not (-180 <= lon <= 180):
             return {
                 'success': False,
                 'message': f'Invalid longitude: {lon} (must be -180 to 180)',
                 'timestamp': datetime.now().isoformat()
             }
-        
-        # Check vehicle readiness
         ready, msg = self._check_vehicle_ready()
         if not ready:
             return {
@@ -966,8 +991,6 @@ class MAVLinkCommander:
                 'message': f'Cannot navigate: {msg}',
                 'timestamp': datetime.now().isoformat()
             }
-        
-        # Simulation mode
         if self.simulation_mode:
             if not self.sim_armed:
                 return {
@@ -975,40 +998,29 @@ class MAVLinkCommander:
                     'message': 'Cannot navigate: Vehicle not armed',
                     'timestamp': datetime.now().isoformat()
                 }
-            
-            # Calculate distance
             distance = self.get_distance_meters(self.sim_lat, self.sim_lon, lat, lon)
             bearing = self.get_bearing(self.sim_lat, self.sim_lon, lat, lon)
-            
             print(f"  [SIM] Navigating to ({lat:.6f}, {lon:.6f})")
             print(f"    Distance: {distance:.1f}m, Bearing: {bearing:.0f}°")
-            time.sleep(2)  # Simulate travel time
-            
+            time.sleep(2)
             self.sim_lat = lat
             self.sim_lon = lon
             if altitude is not None:
                 self.sim_altitude = altitude
-            
             print(f" [SIM] Arrived at destination")
-            
             return {
                 'success': True,
                 'message': f'Arrived at destination (simulated)',
                 'distance_traveled': distance,
                 'timestamp': datetime.now().isoformat()
             }
-        
-        # Real vehicle
         try:
-            # Check if armed
             if not self.vehicle.armed:
                 return {
                     'success': False,
                     'message': 'Cannot navigate: Vehicle not armed',
                     'timestamp': datetime.now().isoformat()
                 }
-            
-            # Ensure in GUIDED mode
             if self.vehicle.mode.name != 'GUIDED':
                 print(f" Switching to GUIDED mode...")
                 mode_result = self.set_mode('GUIDED')
@@ -1018,8 +1030,6 @@ class MAVLinkCommander:
                         'message': f'Failed to switch to GUIDED mode: {mode_result["message"]}',
                         'timestamp': datetime.now().isoformat()
                     }
-            
-            # Get current location
             current_loc = self.vehicle.location.global_relative_frame
             if not current_loc or current_loc.lat is None:
                 return {
@@ -1027,77 +1037,33 @@ class MAVLinkCommander:
                     'message': 'Cannot get current location - GPS not ready',
                     'timestamp': datetime.now().isoformat()
                 }
-            
-            # Calculate initial distance
             start_distance = self.get_distance_meters(
                 current_loc.lat, current_loc.lon, lat, lon
             )
             bearing = self.get_bearing(current_loc.lat, current_loc.lon, lat, lon)
-            
             print(f"   Navigating to ({lat:.6f}, {lon:.6f})")
             print(f"    Distance: {start_distance:.1f}m, Bearing: {bearing:.0f}°")
-            
-            # Set groundspeed if specified
             if groundspeed is not None:
                 self.vehicle.groundspeed = groundspeed
                 print(f"    Groundspeed set to {groundspeed} m/s")
-            
-            # Use altitude if specified, otherwise maintain current
             target_alt = altitude if altitude is not None else current_loc.alt
-            
-            # Create target location
             target_location = LocationGlobalRelative(lat, lon, target_alt)
-            
-            # Send goto command
             self.vehicle.simple_goto(target_location)
-            
-            # Monitor progress
-            start_time = time.time()
-            arrival_threshold = 2.0  # Within 2 meters = arrived
-            
-            while time.time() - start_time < timeout:
-                current_loc = self.vehicle.location.global_relative_frame
-                
-                if not current_loc or current_loc.lat is None:
-                    time.sleep(0.5)
-                    continue
-                
-                # Calculate remaining distance
-                remaining_distance = self.get_distance_meters(
-                    current_loc.lat, current_loc.lon, lat, lon
-                )
-                
-                print(f"    Distance remaining: {remaining_distance:.1f}m", end='\r')
-                
-                # Check if arrived
-                if remaining_distance <= arrival_threshold:
-                    print(f"\n Arrived at destination ({remaining_distance:.1f}m from target)")
-                    return {
-                        'success': True,
-                        'message': f'Arrived at destination ({remaining_distance:.1f}m from target)',
-                        'distance_traveled': start_distance,
-                        'final_distance': remaining_distance,
-                        'time_elapsed': time.time() - start_time,
-                        'timestamp': datetime.now().isoformat()
-                    }
-                
-                time.sleep(0.5)
-            
-            # Timeout reached
-            current_loc = self.vehicle.location.global_relative_frame
-            remaining_distance = self.get_distance_meters(
-                current_loc.lat, current_loc.lon, lat, lon
-            ) if current_loc else 0
-            
-            print(f"\n⚠️  Navigation timeout - {remaining_distance:.1f}m from target")
+            # Start non-blocking progress monitor in background thread
+            monitor_thread = threading.Thread(
+                target=self._monitor_goto_progress,
+                args=(lat, lon, start_distance, timeout),
+                daemon=True
+            )
+            monitor_thread.start()
             return {
-                'success': False,
-                'message': f'Navigation timeout - still {remaining_distance:.1f}m from target',
-                'distance_traveled': start_distance - remaining_distance,
-                'remaining_distance': remaining_distance,
+                'success': True,
+                'message': f'Goto command sent. Navigating to ({lat:.6f}, {lon:.6f})...',
+                'target_lat': lat,
+                'target_lon': lon,
+                'async': True,
                 'timestamp': datetime.now().isoformat()
             }
-            
         except Exception as e:
             print(f"❌ Navigation failed: {e}")
             return {
@@ -1105,6 +1071,41 @@ class MAVLinkCommander:
                 'message': f'Navigation failed: {str(e)}',
                 'timestamp': datetime.now().isoformat()
             }
+
+    def _monitor_goto_progress(self, lat, lon, start_distance, timeout):
+        """Monitor progress to waypoint (runs in background thread)"""
+        start_time = time.time()
+        last_update = start_time
+        arrival_threshold = 2.0
+        try:
+            while time.time() - start_time < timeout:
+                if not self.vehicle or not self.vehicle.armed:
+                    print("  Vehicle disarmed or lost during navigation")
+                    return
+                current_loc = self.vehicle.location.global_relative_frame
+                if not current_loc or current_loc.lat is None:
+                    time.sleep(0.5)
+                    continue
+                remaining_distance = self.get_distance_meters(
+                    current_loc.lat, current_loc.lon, lat, lon
+                )
+                elapsed = time.time() - start_time
+                # Print progress every 2 seconds
+                if elapsed - (last_update - start_time) >= 2.0:
+                    print(f"   [GOTO] Remaining: {remaining_distance:.1f}m to ({lat:.6f}, {lon:.6f}) (elapsed: {elapsed:.0f}s)")
+                    last_update = time.time()
+                if remaining_distance <= arrival_threshold:
+                    print(f" Arrived at destination ({remaining_distance:.1f}m from target)")
+                    return
+                time.sleep(0.5)
+            # Timeout reached
+            current_loc = self.vehicle.location.global_relative_frame
+            remaining_distance = self.get_distance_meters(
+                current_loc.lat, current_loc.lon, lat, lon
+            ) if current_loc else 0
+            print(f"Navigation timeout - {remaining_distance:.1f}m from target")
+        except Exception as e:
+            print(f" Goto monitoring error: {e}")
     
     def get_current_location(self) -> Dict:
         """
