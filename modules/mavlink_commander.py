@@ -989,7 +989,7 @@ class MAVLinkCommander:
             if altitude is not None:
                 self.sim_altitude = altitude
             
-            print(f"✅ [SIM] Arrived at destination")
+            print(f" [SIM] Arrived at destination")
             
             return {
                 'success': True,
@@ -1071,7 +1071,7 @@ class MAVLinkCommander:
                 
                 # Check if arrived
                 if remaining_distance <= arrival_threshold:
-                    print(f"\n✅ Arrived at destination ({remaining_distance:.1f}m from target)")
+                    print(f"\n Arrived at destination ({remaining_distance:.1f}m from target)")
                     return {
                         'success': True,
                         'message': f'Arrived at destination ({remaining_distance:.1f}m from target)',

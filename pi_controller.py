@@ -28,7 +28,7 @@ try:
     from modules.pixhawk_telemetry import PixhawkTelemetry
     PIXHAWK_MODULE_AVAILABLE = True
 except ImportError as e:
-    print(f"⚠️  Pixhawk telemetry module not available: {e}")
+    print(f" Pixhawk telemetry module not available: {e}")
     PIXHAWK_MODULE_AVAILABLE = False
     PixhawkTelemetry = None
 
@@ -37,7 +37,7 @@ try:
     from modules.mavlink_commander import MAVLinkCommander
     MAVLINK_COMMANDER_AVAILABLE = True
 except ImportError as e:
-    print(f"⚠️  MAVLink commander module not available: {e}")
+    print(f" MAVLink commander module not available: {e}")
     MAVLINK_COMMANDER_AVAILABLE = False
     MAVLinkCommander = None
 
