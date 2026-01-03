@@ -26,11 +26,12 @@
     "note": "Captures full-resolution images at regular intervals during mission"
   },
   "pixhawk": {
-    "enabled": true,
+    "enabled": false,
     "connection_string": "/dev/serial0",
     "baud_rate": 57600,
     "simulation_mode": false,
-    "update_rate": 1.0
+    "update_rate": 1.0,
+    "note": "Disabled - no telemetry connection, WiFi only"
   },
   "safety": {
     "geofence_enabled": true,

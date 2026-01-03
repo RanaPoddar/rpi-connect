@@ -1342,15 +1342,23 @@ controller = PiController()
 # Socket.IO event handlers
 @sio.event
 def connect():
-    print(f"Connected to server at {SERVER_URL}")
-    sio.emit('pi_register', {
+    print(f"✅ Connected to server at {SERVER_URL}")
+    print(f"   Registering as Pi ID: {PI_ID}")
+    
+    registration_data = {
         'pi_id': PI_ID,
         'timestamp': datetime.now().isoformat()
-    })
+    }
+    
+    print(f"   Sending pi_register event with data: {registration_data}")
+    sio.emit('pi_register', registration_data)
+    print(f"   ✓ pi_register event emitted")
     
     # Send initial stats
     stats = controller.get_system_stats()
+    print(f"   Sending initial system stats")
     sio.emit('system_stats', {'pi_id': PI_ID, 'stats': stats})
+    print(f"   ✓ system_stats event emitted")
 
 @sio.event
 def disconnect():
