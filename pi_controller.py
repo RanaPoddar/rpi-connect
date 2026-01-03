@@ -891,6 +891,7 @@ class PiController:
         """Stream camera frames via Socket.IO with optional detection"""
         global streaming_active
         import cv2
+        from PIL import Image
         
         try:
             while streaming_active:
@@ -900,11 +901,9 @@ class PiController:
                 if not streaming_active:
                     break
                 
-                # Convert RGB to BGR for OpenCV (same as capture_image does)
-                frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-                
-                # Perform detection if enabled
+                # For detection, convert to BGR
                 if self.detection_active and self.detector:
+                    frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
                     current_time = time.time()
                     
                     # Check cooldown
@@ -920,14 +919,18 @@ class PiController:
                                 # Process detections and send to server
                                 self._process_detections(detections, frame_bgr)
                             
-                            # Visualize detections on frame
+                            # Visualize detections on frame (returns BGR)
                             frame_bgr = self.detector.visualize_detections(frame_bgr, detections)
+                            # Convert back to RGB for encoding
+                            frame = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
                         except Exception as e:
                             print(f"Detection error: {e}")
                 
-                # Encode frame as JPEG (same as capture_image does)
-                _, buffer = cv2.imencode('.jpg', frame_bgr, [cv2.IMWRITE_JPEG_QUALITY, 75])
-                frame_data = base64.b64encode(buffer).decode('utf-8')
+                # Encode RGB frame directly using PIL (no BGR conversion)
+                img = Image.fromarray(frame, 'RGB')
+                buffer_pil = io.BytesIO()
+                img.save(buffer_pil, format='JPEG', quality=75)
+                frame_data = base64.b64encode(buffer_pil.getvalue()).decode('utf-8')
                 
                 # Send frame to server
                 sio.emit('camera_frame', {
