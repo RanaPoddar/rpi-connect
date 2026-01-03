@@ -895,11 +895,14 @@ class PiController:
         
         try:
             while streaming_active:
-                # Capture frame as BGR888 (native format from config)
-                frame_bgr = self.camera.capture_array()
+                # Capture frame (BGR888 config, but may actually be RGB)
+                frame = self.camera.capture_array()
                 
                 if not streaming_active:
                     break
+                
+                # Swap R and B channels (fix color inversion)
+                frame_bgr = frame[:, :, ::-1].copy()
                 
                 # Perform detection if enabled
                 if self.detection_active and self.detector:
