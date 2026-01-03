@@ -742,8 +742,9 @@ class PiController:
                 
                 self.camera = Picamera2()
                 resolution = tuple(settings.get('resolution', [640, 480]))
+                # Use default format like still_configuration does
                 config = self.camera.create_video_configuration(
-                    main={"size": resolution, "format": "RGB888"},
+                    main={"size": resolution},
                     controls={
                         "FrameRate": settings.get('framerate', 30),
                         "AeEnable": True,  # Auto exposure
@@ -761,7 +762,8 @@ class PiController:
                 # Wait for camera auto exposure and white balance to settle
                 print(f"Camera starting - waiting 2 seconds for auto-adjust...")
                 time.sleep(2)
-                print(f"Camera ready with auto white balance")
+                print(f"Camera ready - using default pixel format for IMX477")
+                print(f"Camera format: {self.camera.camera_configuration()}")  # Debug
                 
                 camera_active = True
                 streaming_active = True
@@ -895,15 +897,24 @@ class PiController:
         
         try:
             while streaming_active:
-                # Capture frame as numpy array (RGB format from Picamera2)
+                # Capture frame as numpy array (format depends on camera config)
                 frame = self.camera.capture_array()
                 
                 if not streaming_active:
                     break
                 
+                # Check frame format and convert if needed
+                if len(frame.shape) == 3:
+                    # Color image - check if it's RGB or BGR
+                    # Picamera2 default is usually YUV420 or RGB, let's assume RGB
+                    frame_rgb = frame
+                else:
+                    # Grayscale - convert to RGB
+                    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_GRAY2RGB)
+                
                 # For detection, convert to BGR
                 if self.detection_active and self.detector:
-                    frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+                    frame_bgr = cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2BGR)
                     current_time = time.time()
                     
                     # Check cooldown
@@ -922,12 +933,12 @@ class PiController:
                             # Visualize detections on frame (returns BGR)
                             frame_bgr = self.detector.visualize_detections(frame_bgr, detections)
                             # Convert back to RGB for encoding
-                            frame = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+                            frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
                         except Exception as e:
                             print(f"Detection error: {e}")
                 
                 # Encode RGB frame directly using PIL (no BGR conversion)
-                img = Image.fromarray(frame, 'RGB')
+                img = Image.fromarray(frame_rgb, 'RGB')
                 buffer_pil = io.BytesIO()
                 img.save(buffer_pil, format='JPEG', quality=75)
                 frame_data = base64.b64encode(buffer_pil.getvalue()).decode('utf-8')
