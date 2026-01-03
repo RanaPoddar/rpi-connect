@@ -63,6 +63,15 @@ except ImportError as e:
     CropDetection = None
     GeoLocationCalculator = None
 
+# Import MAVLink Command Receiver module
+try:
+    from modules.mavlink_command_receiver import MAVLinkCommandReceiver
+    MAVLINK_COMMAND_RECEIVER_AVAILABLE = True
+except ImportError as e:
+    print(f"⚠️  MAVLink Command Receiver module not available: {e}")
+    MAVLINK_COMMAND_RECEIVER_AVAILABLE = False
+    MAVLinkCommandReceiver = None
+
 # Load configuration from config.json
 def load_config():
     try:
@@ -98,6 +107,7 @@ class PiController:
         self.commander = None
         self.safety_manager = None
         self.detector = None
+        self.mavlink_receiver = None
         self.pixhawk_enabled = PIXHAWK_ENABLED and PIXHAWK_MODULE_AVAILABLE
         
         # Mission Management
@@ -176,6 +186,33 @@ class PiController:
                     print("✅ Safety Manager initialized and monitoring started")
                 else:
                     print("⚠️  Safety Manager not available")
+                    
+                # Initialize MAVLink Command Receiver if available
+                if MAVLINK_COMMAND_RECEIVER_AVAILABLE and self.pixhawk.vehicle:
+                    print("📡 Initializing MAVLink Command Receiver...")
+                    try:
+                        # Get the underlying PyMAVLink master connection
+                        if hasattr(self.pixhawk.vehicle, '_master'):
+                            mavlink_master = self.pixhawk.vehicle._master
+                        else:
+                            # For simulation mode or when _master not available
+                            from pymavlink import mavutil
+                            mavlink_master = mavutil.mavlink_connection(
+                                self.pixhawk.connection_string,
+                                baud=self.pixhawk.baud_rate
+                            )
+                        
+                        self.mavlink_receiver = MAVLinkCommandReceiver(
+                            mavlink_master,
+                            callback=self._handle_mavlink_command
+                        )
+                        self.mavlink_receiver.start()
+                        print("✅ MAVLink Command Receiver initialized - Long range control enabled!")
+                    except Exception as e:
+                        print(f"⚠️  MAVLink Command Receiver failed to initialize: {e}")
+                        self.mavlink_receiver = None
+                else:
+                    print("⚠️  MAVLink Command Receiver not available")
             else:
                 print("❌ Failed to initialize Pixhawk telemetry")
                 self.pixhawk = None
@@ -273,6 +310,71 @@ class PiController:
                     print(f"   Emergency LAND executed: {result.get('success', False)}")
             except Exception as e:
                 print(f"   ❌ Failed to execute safety action: {e}")
+    
+    def _handle_mavlink_command(self, command_type: str, params: dict):
+        """
+        Handle MAVLink commands received over long-range radio.
+        This enables control of Pi functions even when outside WiFi range.
+        
+        Args:
+            command_type: Type of command ('start_detection', 'stop_detection', etc.)
+            params: Command parameters from MAVLink message
+        """
+        print(f"📡 MAVLink Command Handler: {command_type}")
+        
+        try:
+            if command_type == 'start_detection':
+                self.detection_active = True
+                print("🌾 Detection started via MAVLink")
+                
+                # Send status update via Socket.IO if connected
+                if sio.connected:
+                    sio.emit('detection_status', {
+                        'pi_id': PI_ID,
+                        'status': 'active',
+                        'message': 'Detection started via MAVLink',
+                        'source': 'mavlink'
+                    })
+                    
+            elif command_type == 'stop_detection':
+                self.detection_active = False
+                print("🌾 Detection stopped via MAVLink")
+                
+                if sio.connected:
+                    sio.emit('detection_status', {
+                        'pi_id': PI_ID,
+                        'status': 'inactive',
+                        'message': 'Detection stopped via MAVLink',
+                        'source': 'mavlink'
+                    })
+                    
+            elif command_type == 'request_stats':
+                print("📊 Stats requested via MAVLink")
+                if self.detector and sio.connected:
+                    stats = self.detector.get_statistics()
+                    stats['detection_count'] = self.detection_count
+                    stats['detection_active'] = self.detection_active
+                    sio.emit('detection_stats', {
+                        'pi_id': PI_ID,
+                        'stats': stats,
+                        'source': 'mavlink'
+                    })
+                    
+            elif command_type == 'start_capture':
+                interval = params.get('param1', 2.0)
+                print(f"📸 Periodic capture started via MAVLink (interval={interval}s)")
+                self.periodic_capture_interval = interval
+                self.start_periodic_capture()
+                
+            elif command_type == 'stop_capture':
+                print("📸 Periodic capture stopped via MAVLink")
+                self.stop_periodic_capture()
+                
+            else:
+                print(f"⚠️  Unknown MAVLink command: {command_type}")
+                
+        except Exception as e:
+            print(f"❌ MAVLink command handler error: {e}")
     
     def _process_detections(self, detections: list, frame: np.ndarray):
         """Process detections and send to server"""
