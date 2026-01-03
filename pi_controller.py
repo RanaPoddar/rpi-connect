@@ -895,23 +895,21 @@ class PiController:
         try:
             while streaming_active:
                 # Capture frame as numpy array (RGB format from Picamera2)
-                frame_rgb = self.camera.capture_array()
+                frame = self.camera.capture_array()
                 
                 if not streaming_active:
                     break
                 
-                # Use frame_rgb directly for encoding (no conversion needed)
-                frame_to_encode = frame_rgb
+                # Convert RGB to BGR for OpenCV (same as capture_image does)
+                frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
                 
-                # Perform detection if enabled (detector needs BGR)
+                # Perform detection if enabled
                 if self.detection_active and self.detector:
                     current_time = time.time()
                     
                     # Check cooldown
                     if current_time - self.last_detection_time >= self.detection_cooldown:
                         try:
-                            # Convert to BGR for detection
-                            frame_bgr = cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2BGR)
                             detections = self.detector.detect(frame_bgr)
                             
                             if detections:
@@ -922,16 +920,13 @@ class PiController:
                                 # Process detections and send to server
                                 self._process_detections(detections, frame_bgr)
                             
-                            # Visualize detections on frame (returns BGR)
+                            # Visualize detections on frame
                             frame_bgr = self.detector.visualize_detections(frame_bgr, detections)
-                            # Convert back to RGB for display
-                            frame_to_encode = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
                         except Exception as e:
                             print(f"Detection error: {e}")
                 
-                # Encode RGB frame as JPEG
-                # Note: We need to convert to BGR for imencode as it expects BGR
-                _, buffer = cv2.imencode('.jpg', cv2.cvtColor(frame_to_encode, cv2.COLOR_RGB2BGR), [cv2.IMWRITE_JPEG_QUALITY, 75])
+                # Encode frame as JPEG (same as capture_image does)
+                _, buffer = cv2.imencode('.jpg', frame_bgr, [cv2.IMWRITE_JPEG_QUALITY, 75])
                 frame_data = base64.b64encode(buffer).decode('utf-8')
                 
                 # Send frame to server
