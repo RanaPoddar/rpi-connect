@@ -742,9 +742,9 @@ class PiController:
                 
                 self.camera = Picamera2()
                 resolution = tuple(settings.get('resolution', [640, 480]))
-                # Use default format like still_configuration does
+                # Use BGR888 format directly to match OpenCV
                 config = self.camera.create_video_configuration(
-                    main={"size": resolution},
+                    main={"size": resolution, "format": "BGR888"},
                     controls={
                         "FrameRate": settings.get('framerate', 30),
                         "AeEnable": True,  # Auto exposure
@@ -762,8 +762,7 @@ class PiController:
                 # Wait for camera auto exposure and white balance to settle
                 print(f"Camera starting - waiting 2 seconds for auto-adjust...")
                 time.sleep(2)
-                print(f"Camera ready - using default pixel format for IMX477")
-                print(f"Camera format: {self.camera.camera_configuration()}")  # Debug
+                print(f"Camera ready with BGR888 format for streaming")
                 
                 camera_active = True
                 streaming_active = True
@@ -893,28 +892,17 @@ class PiController:
         """Stream camera frames via Socket.IO with optional detection"""
         global streaming_active
         import cv2
-        from PIL import Image
         
         try:
             while streaming_active:
-                # Capture frame as numpy array (format depends on camera config)
-                frame = self.camera.capture_array()
+                # Capture frame as BGR888 (native format from config)
+                frame_bgr = self.camera.capture_array()
                 
                 if not streaming_active:
                     break
                 
-                # Check frame format and convert if needed
-                if len(frame.shape) == 3:
-                    # Color image - check if it's RGB or BGR
-                    # Picamera2 default is usually YUV420 or RGB, let's assume RGB
-                    frame_rgb = frame
-                else:
-                    # Grayscale - convert to RGB
-                    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_GRAY2RGB)
-                
-                # For detection, convert to BGR
+                # Perform detection if enabled
                 if self.detection_active and self.detector:
-                    frame_bgr = cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2BGR)
                     current_time = time.time()
                     
                     # Check cooldown
@@ -930,18 +918,14 @@ class PiController:
                                 # Process detections and send to server
                                 self._process_detections(detections, frame_bgr)
                             
-                            # Visualize detections on frame (returns BGR)
+                            # Visualize detections on frame
                             frame_bgr = self.detector.visualize_detections(frame_bgr, detections)
-                            # Convert back to RGB for encoding
-                            frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
                         except Exception as e:
                             print(f"Detection error: {e}")
                 
-                # Encode RGB frame directly using PIL (no BGR conversion)
-                img = Image.fromarray(frame_rgb, 'RGB')
-                buffer_pil = io.BytesIO()
-                img.save(buffer_pil, format='JPEG', quality=75)
-                frame_data = base64.b64encode(buffer_pil.getvalue()).decode('utf-8')
+                # Encode BGR frame as JPEG (OpenCV expects BGR)
+                _, buffer = cv2.imencode('.jpg', frame_bgr, [cv2.IMWRITE_JPEG_QUALITY, 75])
+                frame_data = base64.b64encode(buffer).decode('utf-8')
                 
                 # Send frame to server
                 sio.emit('camera_frame', {
