@@ -747,8 +747,8 @@ class PiController:
                     controls={
                         "FrameRate": settings.get('framerate', 30),
                         "AeEnable": True,  # Auto exposure
-                        "AwbEnable": False,  # Disable auto, use manual gains
-                        "ColourGains": (1.5, 1.5),  # Manual white balance (Red, Blue) - reduces blue tint
+                        "AwbEnable": True,  # Enable auto white balance
+                        "AwbMode": 0,  # Auto mode (adapts to lighting)
                         "Saturation": 1.0,
                         "Contrast": 1.0,
                         "Brightness": 0.0,
@@ -758,10 +758,10 @@ class PiController:
                 self.camera.configure(config)
                 self.camera.start()
                 
-                # Wait for camera auto exposure to settle
-                print(f"Camera starting - waiting 2 seconds for exposure to settle...")
+                # Wait for camera auto exposure and white balance to settle
+                print(f"Camera starting - waiting 2 seconds for auto-adjust...")
                 time.sleep(2)
-                print(f"Camera ready with manual white balance (daylight tuned)")
+                print(f"Camera ready with auto white balance")
                 
                 camera_active = True
                 streaming_active = True
