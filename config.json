@@ -10,13 +10,16 @@
   },
   "detection": {
     "enabled": true,
-    "yellow_hsv_lower": [18, 80, 80],
-    "yellow_hsv_upper": [35, 255, 255],
-    "min_contour_area": 500,
-    "confidence_threshold": 0.7,
-    "detection_cooldown": 3.0,
+    "yellow_hsv_lower": [18, 80, 50],
+    "yellow_hsv_upper": [38, 255, 255],
+    "min_contour_area": 150,
+    "confidence_threshold": 0.45,
+    "detection_cooldown": 2.0,
     "auto_detect_in_auto_mode": true,
-    "save_detection_images": true
+    "save_detection_images": true,
+    "adaptive_threshold": true,
+    "debug_mode": false,
+    "note": "Competition tuned: Detects artificial yellow spots/pigmentation on stressed crops. H(18-38)=pure yellow range, S(80+)=vivid saturation to avoid false positives, V(50+)=visible brightness, min_area(150)=small spots detection"
   },
   "periodic_capture": {
     "enabled": true,
@@ -32,6 +35,13 @@
     "simulation_mode": false,
     "update_rate": 1.0,
     "note": "Disabled - no telemetry connection, WiFi only"
+  },
+  "mavlink_detection": {
+    "enabled": true,
+    "description": "Hybrid detection transmission - Socket.IO primary + MAVLink fallback",
+    "send_metadata": false,
+    "send_summary_interval": 30.0,
+    "note": "Enables detection transmission over long-range MAVLink radio when WiFi unavailable"
   },
   "safety": {
     "geofence_enabled": true,

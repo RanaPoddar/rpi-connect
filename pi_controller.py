@@ -72,6 +72,15 @@ except ImportError as e:
     MAVLINK_COMMAND_RECEIVER_AVAILABLE = False
     MAVLinkCommandReceiver = None
 
+# Import MAVLink Detection Sender module
+try:
+    from modules.mavlink_detection_sender import MAVLinkDetectionSender
+    MAVLINK_DETECTION_SENDER_AVAILABLE = True
+except ImportError as e:
+    print(f"⚠️  MAVLink Detection Sender module not available: {e}")
+    MAVLINK_DETECTION_SENDER_AVAILABLE = False
+    MAVLinkDetectionSender = None
+
 # Load configuration from config.json
 def load_config():
     try:
@@ -108,6 +117,7 @@ class PiController:
         self.safety_manager = None
         self.detector = None
         self.mavlink_receiver = None
+        self.mavlink_detection_sender = None
         self.pixhawk_enabled = PIXHAWK_ENABLED and PIXHAWK_MODULE_AVAILABLE
         
         # Mission Management
@@ -213,6 +223,30 @@ class PiController:
                         self.mavlink_receiver = None
                 else:
                     print("⚠️  MAVLink Command Receiver not available")
+                
+                # Initialize MAVLink Detection Sender if available
+                if MAVLINK_DETECTION_SENDER_AVAILABLE and self.pixhawk.vehicle:
+                    print("📡 Initializing MAVLink Detection Sender...")
+                    try:
+                        if hasattr(self.pixhawk.vehicle, '_master'):
+                            mavlink_master = self.pixhawk.vehicle._master
+                        else:
+                            from pymavlink import mavutil
+                            mavlink_master = mavutil.mavlink_connection(
+                                self.pixhawk.connection_string,
+                                baud=self.pixhawk.baud_rate
+                            )
+                        
+                        self.mavlink_detection_sender = MAVLinkDetectionSender(
+                            mavlink_master,
+                            enabled=config.get('mavlink_detection', {}).get('enabled', True)
+                        )
+                        print("✅ MAVLink Detection Sender initialized - Hybrid transmission enabled!")
+                    except Exception as e:
+                        print(f"⚠️  MAVLink Detection Sender failed to initialize: {e}")
+                        self.mavlink_detection_sender = None
+                else:
+                    print("⚠️  MAVLink Detection Sender not available")
             else:
                 print("❌ Failed to initialize Pixhawk telemetry")
                 self.pixhawk = None
@@ -462,9 +496,35 @@ class PiController:
                     'ground_speed': telemetry.get('groundspeed')
                 })
                 
-                # Send to server
-                sio.emit('crop_detection', detection_data)
-                print(f"   📤 [{self.current_mission_id}] Detection {self.detection_count:04d} sent: {unique_id}")
+                # Send to server via Socket.IO (WiFi/LTE)
+                socketio_sent = False
+                if sio.connected:
+                    try:
+                        sio.emit('crop_detection', detection_data)
+                        socketio_sent = True
+                        print(f"   📤 Socket.IO: Detection {self.detection_count:04d} sent: {unique_id}")
+                    except Exception as e:
+                        print(f"   ⚠️  Socket.IO send failed: {e}")
+                
+                # Send via MAVLink (Long-range radio fallback/backup)
+                mavlink_sent = False
+                if self.mavlink_detection_sender and self.mavlink_detection_sender.enabled:
+                    try:
+                        mavlink_sent = self.mavlink_detection_sender.send_detection(detection_data)
+                        if mavlink_sent:
+                            print(f"   📡 MAVLink: Detection {self.detection_count:04d} sent: {unique_id}")
+                    except Exception as e:
+                        print(f"   ⚠️  MAVLink send failed: {e}")
+                
+                # Log transmission status
+                if socketio_sent and mavlink_sent:
+                    print(f"   ✅ [{self.current_mission_id}] Detection {self.detection_count:04d} sent via BOTH channels")
+                elif socketio_sent:
+                    print(f"   ⚠️  [{self.current_mission_id}] Detection sent via Socket.IO only (MAVLink unavailable)")
+                elif mavlink_sent:
+                    print(f"   ⚠️  [{self.current_mission_id}] Detection sent via MAVLink only (Socket.IO unavailable)")
+                else:
+                    print(f"   ❌ [{self.current_mission_id}] Detection {self.detection_count:04d} FAILED - no transmission channel available!")
                 
                 # Optional: Save locally
                 if config.get('detection', {}).get('save_detection_images', False):

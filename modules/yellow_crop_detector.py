@@ -75,20 +75,25 @@ class YellowCropDetector:
         self.upper_yellow = np.array(self.config.get('yellow_hsv_upper', [35, 255, 255]))
         
         # Detection parameters
-        self.min_area = self.config.get('min_contour_area', 500)
-        self.confidence_threshold = self.config.get('confidence_threshold', 0.7)
+        self.min_area = self.config.get('min_contour_area', 300)
+        self.confidence_threshold = self.config.get('confidence_threshold', 0.5)
+        self.adaptive_threshold = self.config.get('adaptive_threshold', True)
+        self.debug_mode = self.config.get('debug_mode', False)
         
-        # Morphological operations kernels
-        self.kernel_open = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-        self.kernel_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (11, 11))
+        # Morphological operations kernels (reduced size for better small crop detection)
+        self.kernel_open = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+        self.kernel_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
+        self.kernel_dilate = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
         
         # Detection statistics
         self.total_detections = 0
         self.frame_count = 0
         
         self.logger.info("🌾 Yellow Crop Detector initialized")
+        self.logger.info(f"   Mode: Stressed Crop Detection (Competition)")
         self.logger.info(f"   HSV Range: Lower={self.lower_yellow}, Upper={self.upper_yellow}")
         self.logger.info(f"   Min Area: {self.min_area}px, Confidence: {self.confidence_threshold}")
+        self.logger.info(f"   Target: Yellow spots/pigmentation on affected crops")
     
     def preprocess_frame(self, frame: np.ndarray) -> np.ndarray:
         """
@@ -100,22 +105,29 @@ class YellowCropDetector:
         Returns:
             Preprocessed frame
         """
-        # Apply Gaussian blur to reduce noise
-        blurred = cv2.GaussianBlur(frame, (5, 5), 0)
+        # Apply bilateral filter to reduce noise while preserving edges
+        filtered = cv2.bilateralFilter(frame, 9, 75, 75)
         
-        # Enhance contrast using CLAHE on L channel
-        lab = cv2.cvtColor(blurred, cv2.COLOR_BGR2LAB)
+        # Enhance contrast using CLAHE on L channel (more aggressive)
+        lab = cv2.cvtColor(filtered, cv2.COLOR_BGR2LAB)
         l, a, b = cv2.split(lab)
-        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
         l = clahe.apply(l)
         enhanced = cv2.merge([l, a, b])
         enhanced = cv2.cvtColor(enhanced, cv2.COLOR_LAB2BGR)
+        
+        # Boost saturation slightly to make yellow more prominent
+        hsv = cv2.cvtColor(enhanced, cv2.COLOR_BGR2HSV)
+        h, s, v = cv2.split(hsv)
+        s = cv2.add(s, 20)  # Increase saturation
+        enhanced_hsv = cv2.merge([h, s, v])
+        enhanced = cv2.cvtColor(enhanced_hsv, cv2.COLOR_HSV2BGR)
         
         return enhanced
     
     def create_yellow_mask(self, frame: np.ndarray) -> np.ndarray:
         """
-        Create binary mask for yellow regions
+        Create binary mask for yellow regions (competition: yellow spots on stressed crops)
         
         Args:
             frame: Input BGR frame
@@ -126,15 +138,42 @@ class YellowCropDetector:
         # Convert to HSV color space
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
         
-        # Create mask for yellow color
+        # Create primary mask for yellow color
         mask = cv2.inRange(hsv, self.lower_yellow, self.upper_yellow)
         
-        # Apply morphological operations to clean up mask
-        # Opening: removes small noise
-        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, self.kernel_open)
+        if self.adaptive_threshold:
+            # Create secondary mask with slightly wider range for edge cases
+            # (for spots that might be partially shaded or at different angles)
+            lower_adaptive = np.array([
+                max(0, self.lower_yellow[0] - 3),
+                max(60, self.lower_yellow[1] - 20),
+                max(30, self.lower_yellow[2] - 20)
+            ])
+            upper_adaptive = np.array([
+                min(180, self.upper_yellow[0] + 3),
+                255,
+                255
+            ])
+            mask_adaptive = cv2.inRange(hsv, lower_adaptive, upper_adaptive)
+            
+            # Combine masks (union) - this catches spots in varied lighting
+            mask = cv2.bitwise_or(mask, mask_adaptive)
         
-        # Closing: fills small holes
-        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, self.kernel_close)
+        # Apply morphological operations to clean up mask
+        # Opening: removes small noise/artifacts
+        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, self.kernel_open, iterations=1)
+        
+        # Dilation: expand detected regions slightly (helps with partial spots)
+        mask = cv2.dilate(mask, self.kernel_dilate, iterations=1)
+        
+        # Closing: fills small holes within detected spots
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, self.kernel_close, iterations=1)
+        
+        if self.debug_mode:
+            total_pixels = mask.size
+            white_pixels = np.sum(mask > 0)
+            coverage = (white_pixels / total_pixels) * 100
+            self.logger.info(f"Mask stats: {white_pixels} yellow pixels ({coverage:.2f}% coverage)")
         
         return mask
     
@@ -202,15 +241,24 @@ class YellowCropDetector:
         bbox_area = w * h
         fill_ratio = area / bbox_area if bbox_area > 0 else 0
         
-        # Factor 3: Size-based confidence (prefer medium-sized objects)
-        size_score = min(area / (self.min_area * 10), 1.0)
+        # Factor 3: Size-based confidence (prefer medium-sized objects, but be generous)
+        size_score = min(area / (self.min_area * 5), 1.0)
         
-        # Weighted combination
+        # Factor 4: Pixel density in mask
+        mask_pixels = np.sum(mask_region > 0)
+        density = mask_pixels / mask_region.size if mask_region.size > 0 else 0
+        
+        # Weighted combination (adjusted to be less restrictive)
         confidence = (
-            0.3 * circularity +
-            0.4 * fill_ratio +
-            0.3 * size_score
+            0.15 * circularity +      # Less weight on shape
+            0.30 * fill_ratio +       # Moderate weight on fill
+            0.25 * size_score +       # Moderate weight on size
+            0.30 * density            # Good weight on actual yellow pixels
         )
+        
+        # Boost confidence if area is substantial
+        if area > self.min_area * 3:
+            confidence = min(confidence + 0.1, 1.0)
         
         return min(confidence, 1.0)
     
@@ -239,6 +287,9 @@ class YellowCropDetector:
         # Extract crop regions
         crop_regions = self.extract_crop_regions(mask)
         
+        if self.debug_mode:
+            self.logger.info(f"Frame {self.frame_count}: Found {len(crop_regions)} candidate regions")
+        
         # Create detection objects
         detections = []
         
@@ -251,6 +302,8 @@ class YellowCropDetector:
             
             # Filter by confidence threshold
             if confidence < self.confidence_threshold:
+                if self.debug_mode:
+                    self.logger.debug(f"Filtered out: confidence {confidence:.2f} < threshold {self.confidence_threshold}")
                 continue
             
             # Create detection object
