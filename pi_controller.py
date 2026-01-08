@@ -1515,7 +1515,7 @@ def handle_stop_stream(data):
 @sio.on('start_detection')
 def handle_start_detection(data):
     """Start yellow crop detection"""
-    global streaming_active
+    global streaming_active, camera_active
     
     if not controller.detector:
         sio.emit('detection_status', {
@@ -1534,7 +1534,7 @@ def handle_start_detection(data):
         print(f"🚀 Auto-started mission: {mission_id}")
     
     # Auto-start camera stream if not already streaming
-    if not streaming_active:
+    if not streaming_active and not camera_active:
         print("📹 Auto-starting camera for detection...")
         result = controller.start_camera_stream({})
         if result.get('success'):
@@ -1547,6 +1547,13 @@ def handle_start_detection(data):
                 'message': f"Camera start failed: {result.get('message')}"
             })
             return
+    elif camera_active and not streaming_active:
+        # Camera exists but streaming stopped - restart streaming
+        print("📹 Restarting camera stream...")
+        streaming_active = True
+        Thread(target=controller._stream_frames, daemon=True).start()
+    elif streaming_active:
+        print("📹 Camera already streaming")
     
     controller.detection_active = True
     print("🌾 Detection started")
