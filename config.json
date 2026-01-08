@@ -1,5 +1,5 @@
 {
-  "server_url": "http://10.205.183.8:3000",
+  "server_url": "http://10.141.104.94:3000",
   "pi_id": "detection_drone_pi_pushpak",
   "camera": {
     "enabled": true,
@@ -29,9 +29,9 @@
     "note": "Captures full-resolution images at regular intervals during mission"
   },
   "pixhawk": {
-    "enabled": false,
+    "enabled": true,
     "connection_string": "/dev/serial0",
-    "baud_rate": 57600,
+    "baud_rate": 115200,
     "simulation_mode": false,
     "update_rate": 1.0,
     "note": "Disabled - no telemetry connection, WiFi only"
@@ -50,7 +50,7 @@
     "geofence_min_altitude": 2,
     "battery_rtl_threshold": 25,
     "battery_land_threshold": 15,
-    "battery_critical_voltage": 10.5,
+    "battery_critical_voltage": 13.5,
     "connection_timeout": 10,
     "telemetry_timeout": 5
   },
