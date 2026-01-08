@@ -31,17 +31,20 @@
   "pixhawk": {
     "enabled": true,
     "connection_string": "/dev/serial0",
-    "baud_rate": 115200,
+    "baud_rate": 921600,
     "simulation_mode": false,
-    "update_rate": 1.0,
-    "note": "Disabled - no telemetry connection, WiFi only"
+    "update_rate": 10.0,
+    "read_only": true,
+    "system_id": 255,
+    "component_id": 191,
+    "note": "TELEM2 connection - High-speed GPS for detection coordinates. Read-only mode prevents conflicts with GCS on TELEM1"
   },
   "mavlink_detection": {
     "enabled": true,
     "description": "Hybrid detection transmission - Socket.IO primary + MAVLink fallback",
-    "send_metadata": false,
+    "send_metadata": true,
     "send_summary_interval": 30.0,
-    "note": "Enables detection transmission over long-range MAVLink radio when WiFi unavailable"
+    "note": "Enables detection transmission over long-range MAVLink radio via Pixhawk to GCS. Messages forwarded from TELEM2 to TELEM1 automatically."
   },
   "safety": {
     "geofence_enabled": true,
