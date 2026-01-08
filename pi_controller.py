@@ -1523,6 +1523,14 @@ def handle_start_detection(data):
         })
         return
     
+    # Auto-start mission if not already active
+    if not controller.mission_active:
+        mission_id = f"auto_mission_{int(time.time())}"
+        controller.current_mission_id = mission_id
+        controller.mission_active = True
+        controller.detection_count = 0
+        print(f"🚀 Auto-started mission: {mission_id}")
+    
     controller.detection_active = True
     print("🌾 Detection started")
     sio.emit('detection_status', {
