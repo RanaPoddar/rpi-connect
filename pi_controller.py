@@ -431,15 +431,17 @@ class PiController:
                 detection.detection_id = unique_id
                 
                 # Calculate accurate ground GPS coordinates using photogrammetry
-                if self.geo_calculator and telemetry.get('latitude') and telemetry.get('longitude'):
+                gps_data = telemetry.get('gps', {})
+                if self.geo_calculator and gps_data.get('lat') and gps_data.get('lon'):
                     try:
                         # Get drone telemetry
-                        drone_lat = telemetry.get('latitude', 0.0)
-                        drone_lon = telemetry.get('longitude', 0.0)
-                        altitude_agl = telemetry.get('altitude', 0.0)  # Altitude above ground
+                        drone_lat = gps_data.get('lat', 0.0)
+                        drone_lon = gps_data.get('lon', 0.0)
+                        altitude_agl = gps_data.get('relative_alt', 0.0)  # Altitude above ground
+                        attitude = telemetry.get('attitude', {})
                         heading_deg = telemetry.get('heading', 0.0)
-                        pitch_deg = telemetry.get('pitch', 0.0) if telemetry.get('pitch') is not None else 0.0
-                        roll_deg = telemetry.get('roll', 0.0) if telemetry.get('roll') is not None else 0.0
+                        pitch_deg = attitude.get('pitch', 0.0)
+                        roll_deg = attitude.get('roll', 0.0)
                         
                         # Convert pixel coordinates to ground GPS using photogrammetry
                         ground_lat, ground_lon = self.geo_calculator.pixel_to_gps(
@@ -463,14 +465,15 @@ class PiController:
                         
                     except Exception as e:
                         print(f"⚠️  Photogrammetry calculation failed: {e}, using drone GPS")
-                        detection.latitude = telemetry.get('latitude', 0.0)
-                        detection.longitude = telemetry.get('longitude', 0.0)
-                        detection.altitude = telemetry.get('altitude', 0.0)
+                        detection.latitude = gps_data.get('lat', 0.0)
+                        detection.longitude = gps_data.get('lon', 0.0)
+                        detection.altitude = gps_data.get('relative_alt', 0.0)
                 else:
                     # Fallback to drone GPS if photogrammetry unavailable
-                    detection.latitude = telemetry.get('latitude', 0.0)
-                    detection.longitude = telemetry.get('longitude', 0.0)
-                    detection.altitude = telemetry.get('altitude', 0.0)
+                    print(f"⚠️  No GPS data available - GPS: lat={gps_data.get('lat', 0)}, lon={gps_data.get('lon', 0)}")
+                    detection.latitude = gps_data.get('lat', 0.0)
+                    detection.longitude = gps_data.get('lon', 0.0)
+                    detection.altitude = gps_data.get('relative_alt', 0.0)
                 
                 # Extract detection region from frame
                 x, y, w, h = detection.bbox
