@@ -1532,6 +1532,17 @@ def handle_start_detection(data):
         controller.mission_active = True
         controller.detection_count = 0
         print(f"🚀 Auto-started mission: {mission_id}")
+        
+        # Notify server about the new mission
+        if sio.connected:
+            sio.emit('mission_started', {
+                'mission_id': mission_id,
+                'drone_id': 1,
+                'pi_id': PI_ID,
+                'timestamp': datetime.now().isoformat(),
+                'auto_started': True
+            })
+            print(f"   📡 Notified server about mission: {mission_id}")
     
     # Auto-start camera stream if not already streaming
     if not streaming_active and not camera_active:
@@ -1566,12 +1577,30 @@ def handle_start_detection(data):
 @sio.on('stop_detection')
 def handle_stop_detection(data):
     """Stop yellow crop detection"""
+    global streaming_active
+    
     controller.detection_active = False
     print("🌾 Detection stopped")
+    
+    # Also stop camera stream
+    if streaming_active:
+        print("📹 Stopping camera stream...")
+        result = controller.stop_camera_stream()
+        if result.get('success'):
+            print("✅ Camera stopped successfully")
+        else:
+            print(f"⚠️ Camera stop: {result.get('message')}")
+    
+    # Stop mission
+    if controller.mission_active:
+        print(f"🏁 Stopping mission: {controller.current_mission_id}")
+        controller.mission_active = False
+        controller.current_mission_id = None
+    
     sio.emit('detection_status', {
         'pi_id': PI_ID,
         'status': 'inactive',
-        'message': 'Detection stopped'
+        'message': 'Detection and camera stopped'
     })
 
 @sio.on('get_detection_stats')
