@@ -71,8 +71,10 @@ class YellowCropDetector:
         self.logger = logger or logging.getLogger(__name__)
         
         # HSV Color thresholds for yellow detection
-        self.lower_yellow = np.array(self.config.get('yellow_hsv_lower', [18, 80, 80]))
-        self.upper_yellow = np.array(self.config.get('yellow_hsv_upper', [35, 255, 255]))
+        # IMPORTANT: These ranges must be TIGHT to avoid false positives on other colors
+        # Hue 20-30 = pure yellow, higher saturation = vivid yellow only
+        self.lower_yellow = np.array(self.config.get('yellow_hsv_lower', [20, 90, 60]))
+        self.upper_yellow = np.array(self.config.get('yellow_hsv_upper', [30, 255, 255]))
         
         # Detection parameters
         self.min_area = self.config.get('min_contour_area', 300)
@@ -80,10 +82,10 @@ class YellowCropDetector:
         self.adaptive_threshold = self.config.get('adaptive_threshold', True)
         self.debug_mode = self.config.get('debug_mode', False)
         
-        # Morphological operations kernels (reduced size for better small crop detection)
-        self.kernel_open = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
-        self.kernel_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
-        self.kernel_dilate = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+        # Morphological operations kernels (larger to merge nearby regions)
+        self.kernel_open = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+        self.kernel_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15))
+        self.kernel_dilate = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
         
         # Detection statistics
         self.total_detections = 0
@@ -97,7 +99,8 @@ class YellowCropDetector:
     
     def preprocess_frame(self, frame: np.ndarray) -> np.ndarray:
         """
-        Preprocess frame for better detection
+        Preprocess frame for better yellow detection
+        Enhances yellow while suppressing other colors
         
         Args:
             frame: Input BGR frame
@@ -108,7 +111,7 @@ class YellowCropDetector:
         # Apply bilateral filter to reduce noise while preserving edges
         filtered = cv2.bilateralFilter(frame, 9, 75, 75)
         
-        # Enhance contrast using CLAHE on L channel (more aggressive)
+        # Enhance contrast using CLAHE on L channel
         lab = cv2.cvtColor(filtered, cv2.COLOR_BGR2LAB)
         l, a, b = cv2.split(lab)
         clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
@@ -116,11 +119,18 @@ class YellowCropDetector:
         enhanced = cv2.merge([l, a, b])
         enhanced = cv2.cvtColor(enhanced, cv2.COLOR_LAB2BGR)
         
-        # Boost saturation slightly to make yellow more prominent
+        # Convert to HSV and selectively boost saturation ONLY in yellow range
         hsv = cv2.cvtColor(enhanced, cv2.COLOR_BGR2HSV)
         h, s, v = cv2.split(hsv)
-        s = cv2.add(s, 20)  # Increase saturation
-        enhanced_hsv = cv2.merge([h, s, v])
+        
+        # Create mask for yellow hue range (20-30 in HSV)
+        hue_mask = cv2.inRange(h, 20, 30)
+        
+        # Only boost saturation where hue is yellow (preserve other colors)
+        s_boosted = np.where(hue_mask > 0, cv2.add(s, 20), s)
+        
+        # Merge back and convert to BGR
+        enhanced_hsv = cv2.merge([h, s_boosted, v])
         enhanced = cv2.cvtColor(enhanced_hsv, cv2.COLOR_HSV2BGR)
         
         return enhanced
@@ -138,36 +148,21 @@ class YellowCropDetector:
         # Convert to HSV color space
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
         
-        # Create primary mask for yellow color
+        # Create primary mask for STRICT yellow color detection only
+        # Hue 20-30: Pure yellow range
+        # Saturation 90+: Only vivid, saturated yellows (excludes pale/desaturated colors)
+        # Value 60+: Bright enough to be visible
         mask = cv2.inRange(hsv, self.lower_yellow, self.upper_yellow)
         
-        if self.adaptive_threshold:
-            # Create secondary mask with slightly wider range for edge cases
-            # (for spots that might be partially shaded or at different angles)
-            lower_adaptive = np.array([
-                max(0, self.lower_yellow[0] - 3),
-                max(60, self.lower_yellow[1] - 20),
-                max(30, self.lower_yellow[2] - 20)
-            ])
-            upper_adaptive = np.array([
-                min(180, self.upper_yellow[0] + 3),
-                255,
-                255
-            ])
-            mask_adaptive = cv2.inRange(hsv, lower_adaptive, upper_adaptive)
-            
-            # Combine masks (union) - this catches spots in varied lighting
-            mask = cv2.bitwise_or(mask, mask_adaptive)
-        
-        # Apply morphological operations to clean up mask
+        # Apply aggressive morphological operations to merge nearby regions
         # Opening: removes small noise/artifacts
         mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, self.kernel_open, iterations=1)
         
-        # Dilation: expand detected regions slightly (helps with partial spots)
-        mask = cv2.dilate(mask, self.kernel_dilate, iterations=1)
+        # Dilation: expand detected regions (merges nearby fragments)
+        mask = cv2.dilate(mask, self.kernel_dilate, iterations=2)
         
-        # Closing: fills small holes within detected spots
-        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, self.kernel_close, iterations=1)
+        # Closing: fills holes and merges nearby regions (multiple iterations)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, self.kernel_close, iterations=2)
         
         if self.debug_mode:
             total_pixels = mask.size

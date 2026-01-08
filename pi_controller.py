@@ -935,10 +935,47 @@ class PiController:
                         'mode': telemetry.get('mode', 'UNKNOWN')
                     }
                     
-                    # Send to server if configured
+                    # Send to server via Socket.IO (WiFi/LTE primary)
+                    socketio_sent = False
                     if self.periodic_capture_config.get('send_to_server', True) and sio.connected:
-                        sio.emit('periodic_image', image_packet)
-                        print(f"   📷 Periodic image {self.periodic_capture_count:04d} sent")
+                        try:
+                            sio.emit('periodic_image', image_packet)
+                            socketio_sent = True
+                            print(f"   📷 Periodic image {self.periodic_capture_count:04d} sent via Socket.IO")
+                        except Exception as e:
+                            print(f"   ⚠️  Socket.IO periodic image send failed: {e}")
+                    
+                    # Fallback to MAVLink if Socket.IO failed or unavailable
+                    mavlink_sent = False
+                    if not socketio_sent and self.mavlink_detection_sender and self.mavlink_detection_sender.enabled:
+                        try:
+                            # Send compressed metadata over MAVLink (full image too large)
+                            # Images are stored locally for post-landing sync
+                            metadata = {
+                                'image_id': image_id,
+                                'mission_id': self.current_mission_id,
+                                'timestamp': timestamp,
+                                'latitude': telemetry.get('latitude', 0.0),
+                                'longitude': telemetry.get('longitude', 0.0),
+                                'altitude': telemetry.get('altitude', 0.0),
+                                'image_type': 'periodic',
+                                'stored_locally': True
+                            }
+                            mavlink_sent = self.mavlink_detection_sender.send_image_metadata(metadata)
+                            if mavlink_sent:
+                                print(f"   📡 Periodic image {self.periodic_capture_count:04d} metadata sent via MAVLink")
+                        except Exception as e:
+                            print(f"   ⚠️  MAVLink image metadata send failed: {e}")
+                    
+                    # Log transmission status
+                    if socketio_sent and mavlink_sent:
+                        print(f"   ✅ Periodic image sent via BOTH channels")
+                    elif socketio_sent:
+                        print(f"   ✅ Periodic image sent via Socket.IO only")
+                    elif mavlink_sent:
+                        print(f"   ⚠️  Periodic image metadata sent via MAVLink only (WiFi unavailable)")
+                    else:
+                        print(f"   ❌ Periodic image FAILED - no transmission channel available!")
                     
                     self.last_periodic_capture_time = current_time
                     
@@ -1509,6 +1546,55 @@ def handle_get_detection_stats(data):
         sio.emit('detection_stats', {
             'pi_id': PI_ID,
             'stats': stats
+        })
+
+@sio.on('test_pi_connection')
+def handle_test_pi_connection(data):
+    """Test Pi telemetry connection and return system status"""
+    try:
+        request_timestamp = data.get('timestamp', 0)
+        current_timestamp = time.time() * 1000  # Convert to milliseconds
+        latency = int(current_timestamp - request_timestamp) if request_timestamp else 0
+        
+        print(f"📡 Connection test request received (latency: {latency}ms)")
+        
+        # Gather system status
+        response = {
+            'status': 'ok',
+            'pi_id': PI_ID,
+            'latency': latency,
+            'timestamp': current_timestamp,
+            'pixhawk_connected': controller.pixhawk.connected if controller.pixhawk else False,
+            'camera_enabled': CAMERA_ENABLED,
+            'detection_enabled': controller.detection_enabled,
+            'detection_active': controller.detection_active,
+            'mission_active': controller.mission_active,
+            'system_info': {
+                'cpu_percent': psutil.cpu_percent(interval=0.1),
+                'memory_percent': psutil.virtual_memory().percent,
+                'disk_percent': psutil.disk_usage('/').percent
+            }
+        }
+        
+        # Add telemetry if available
+        if controller.pixhawk and controller.pixhawk.connected:
+            telemetry = controller.pixhawk.get_telemetry()
+            response['telemetry'] = {
+                'mode': telemetry.get('mode', 'UNKNOWN'),
+                'armed': telemetry.get('armed', False),
+                'gps_satellites': telemetry.get('satellites_visible', 0),
+                'battery_voltage': telemetry.get('battery_voltage', 0.0)
+            }
+        
+        sio.emit('pi_connection_test_result', response)
+        print(f"✅ Connection test response sent (latency: {latency}ms)")
+        
+    except Exception as e:
+        print(f"❌ Connection test failed: {e}")
+        sio.emit('pi_connection_test_result', {
+            'status': 'error',
+            'pi_id': PI_ID,
+            'message': str(e)
         })
 
 # ========================================

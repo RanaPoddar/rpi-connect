@@ -15,16 +15,17 @@ class SimpleYellowDetector:
     def __init__(self, config):
         detection_config = config.get('detection', {})
         
-        self.lower_yellow = np.array(detection_config.get('yellow_hsv_lower', [15, 40, 40]))
-        self.upper_yellow = np.array(detection_config.get('yellow_hsv_upper', [40, 255, 255]))
+        # STRICT yellow-only detection (updated defaults)
+        self.lower_yellow = np.array(detection_config.get('yellow_hsv_lower', [20, 90, 60]))
+        self.upper_yellow = np.array(detection_config.get('yellow_hsv_upper', [30, 255, 255]))
         self.min_area = detection_config.get('min_contour_area', 300)
         self.confidence_threshold = detection_config.get('confidence_threshold', 0.5)
-        self.adaptive_threshold = detection_config.get('adaptive_threshold', True)
+        self.adaptive_threshold = detection_config.get('adaptive_threshold', False)
         
-        # Morphological kernels
-        self.kernel_open = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
-        self.kernel_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
-        self.kernel_dilate = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+        # Morphological kernels (larger for merging nearby regions)
+        self.kernel_open = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+        self.kernel_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15))
+        self.kernel_dilate = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
         
         self.detection_count = 0
         
@@ -35,7 +36,7 @@ class SimpleYellowDetector:
         print(f"   Adaptive: {self.adaptive_threshold}")
     
     def preprocess_frame(self, frame):
-        """Enhance frame for better detection"""
+        """Enhance frame for better yellow detection (selective boost)"""
         # Bilateral filter
         filtered = cv2.bilateralFilter(frame, 9, 75, 75)
         
@@ -47,41 +48,35 @@ class SimpleYellowDetector:
         enhanced = cv2.merge([l, a, b])
         enhanced = cv2.cvtColor(enhanced, cv2.COLOR_LAB2BGR)
         
-        # Boost saturation
+        # Selective saturation boost ONLY in yellow hue range
         hsv = cv2.cvtColor(enhanced, cv2.COLOR_BGR2HSV)
         h, s, v = cv2.split(hsv)
-        s = cv2.add(s, 20)
-        enhanced_hsv = cv2.merge([h, s, v])
+        hue_mask = cv2.inRange(h, 20, 30)  # Only yellow hues (binary mask)
+        s_boosted = s.copy()
+        # Apply boost where mask is non-zero
+        s_boosted = np.where(hue_mask > 0, cv2.add(s, 20), s)
+        enhanced_hsv = cv2.merge([h, s_boosted, v])
         enhanced = cv2.cvtColor(enhanced_hsv, cv2.COLOR_HSV2BGR)
         
         return enhanced
     
     def create_yellow_mask(self, frame):
-        """Create binary mask for yellow regions"""
+        """Create binary mask for STRICT yellow-only regions"""
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
         
-        # Create multiple masks for better detection
-        # Mask 1: Primary yellow range
-        mask1 = cv2.inRange(hsv, self.lower_yellow, self.upper_yellow)
+        # Single strict mask for pure yellow only
+        # H: 20-30 (pure yellow)
+        # S: 90+ (vivid saturation, rejects pale colors)
+        # V: 60+ (bright enough to be visible)
+        mask = cv2.inRange(hsv, self.lower_yellow, self.upper_yellow)
         
-        # Mask 2: Yellow-green (15-25 H)
-        mask2 = cv2.inRange(hsv, np.array([15, 30, 30]), np.array([25, 255, 255]))
-        
-        # Mask 3: Pure yellow (25-35 H)
-        mask3 = cv2.inRange(hsv, np.array([25, 30, 30]), np.array([35, 255, 255]))
-        
-        # Mask 4: Yellow-orange (35-45 H)
-        mask4 = cv2.inRange(hsv, np.array([35, 30, 30]), np.array([45, 255, 255]))
-        
-        # Combine all masks
-        mask = cv2.bitwise_or(mask1, mask2)
-        mask = cv2.bitwise_or(mask, mask3)
-        mask = cv2.bitwise_or(mask, mask4)
-        
-        # Morphological operations
+        # Aggressive morphological operations to merge nearby regions
+        # Opening: remove noise
         mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, self.kernel_open, iterations=1)
-        mask = cv2.dilate(mask, self.kernel_dilate, iterations=1)
-        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, self.kernel_close, iterations=1)
+        # Dilation: expand regions
+        mask = cv2.dilate(mask, self.kernel_dilate, iterations=2)
+        # Closing: merge nearby regions (multiple iterations for larger sheets)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, self.kernel_close, iterations=2)
         
         return mask
     

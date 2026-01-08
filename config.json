@@ -10,16 +10,16 @@
   },
   "detection": {
     "enabled": true,
-    "yellow_hsv_lower": [18, 80, 50],
-    "yellow_hsv_upper": [38, 255, 255],
+    "yellow_hsv_lower": [20, 90, 60],
+    "yellow_hsv_upper": [30, 255, 255],
     "min_contour_area": 150,
     "confidence_threshold": 0.45,
     "detection_cooldown": 2.0,
     "auto_detect_in_auto_mode": true,
     "save_detection_images": true,
-    "adaptive_threshold": true,
+    "adaptive_threshold": false,
     "debug_mode": false,
-    "note": "Competition tuned: Detects artificial yellow spots/pigmentation on stressed crops. H(18-38)=pure yellow range, S(80+)=vivid saturation to avoid false positives, V(50+)=visible brightness, min_area(150)=small spots detection"
+    "note": "Competition tuned v2: STRICT yellow-only detection. H(20-30)=pure yellow, S(90+)=vivid saturation (rejects pale colors), V(60+)=visible brightness. Removed adaptive threshold. Selective saturation boost only in yellow hue range prevents false positives on other colors."
   },
   "periodic_capture": {
     "enabled": true,

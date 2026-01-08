@@ -177,6 +177,40 @@ class MAVLinkDetectionSender:
             print(f"❌ MAVLink metadata send failed: {e}")
             return False
     
+    def send_image_metadata(self, metadata: Dict) -> bool:
+        """
+        Send image capture metadata over MAVLink (image stored locally on Pi)
+        Full images are too large for MAVLink bandwidth, so only metadata is sent
+        
+        Args:
+            metadata: Dictionary with image metadata (id, lat, lon, type, mission)
+            
+        Returns:
+            True if sent successfully
+        """
+        if not self.enabled or not self.master:
+            return False
+            
+        try:
+            # Extract metadata
+            img_id = metadata.get('image_id', 'unknown')[:15]
+            lat = metadata.get('latitude', 0.0)
+            lon = metadata.get('longitude', 0.0)
+            img_type = metadata.get('image_type', 'periodic')[:8]
+            mission = metadata.get('mission_id', 'none')[:10]
+            
+            # Format: IMG|ID|LAT|LON|TYPE|MISSION
+            message = f"IMG|{img_id}|{lat:.6f}|{lon:.6f}|{img_type}|{mission}"
+            
+            self._send_statustext(message, self.SEVERITY_INFO)
+            print(f"📡 MAVLink: Sent image metadata {img_id}")
+            
+            return True
+            
+        except Exception as e:
+            print(f"❌ MAVLink image metadata send failed: {e}")
+            return False
+    
     def _send_statustext(self, text: str, severity: int = SEVERITY_INFO):
         """
         Send STATUSTEXT message over MAVLink
