@@ -1026,14 +1026,15 @@ class PiController:
                 _, buffer = cv2.imencode('.jpg', frame_bgr, [cv2.IMWRITE_JPEG_QUALITY, 75])
                 frame_data = base64.b64encode(buffer).decode('utf-8')
                 
-                # Send frame to server
-                sio.emit('camera_frame', {
-                    'pi_id': PI_ID,
-                    'frame': frame_data,
-                    'timestamp': time.time()
-                })
+                # Send frame to server (only if connected)
+                if sio.connected:
+                    sio.emit('camera_frame', {
+                        'pi_id': PI_ID,
+                        'frame': frame_data,
+                        'timestamp': time.time()
+                    })
                 
-                time.sleep(0.033)  # ~30 fps
+                time.sleep(0.1)  # ~10 fps (reduced to prevent disconnection)
                 
         except Exception as e:
             print(f"Streaming error: {e}")
@@ -1459,7 +1460,8 @@ def connect():
 
 @sio.event
 def disconnect():
-    print("Disconnected from server")
+    print("❌ Disconnected from server")
+    print("   Will attempt to reconnect automatically...")
 
 @sio.on('execute_command')
 def handle_command(data):
