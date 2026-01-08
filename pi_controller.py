@@ -197,51 +197,50 @@ class PiController:
                 else:
                     print("⚠️  Safety Manager not available")
                     
-                # Initialize MAVLink Command Receiver if available
-                if MAVLINK_COMMAND_RECEIVER_AVAILABLE and self.pixhawk.vehicle:
+                # Initialize MAVLink Command Receiver if available and enabled
+                mavlink_command_config = config.get('mavlink_command_receiver', {})
+                if (mavlink_command_config.get('enabled', False) and 
+                    MAVLINK_COMMAND_RECEIVER_AVAILABLE and self.pixhawk.vehicle):
                     print("📡 Initializing MAVLink Command Receiver...")
                     try:
-                        # Get the underlying PyMAVLink master connection
+                        # Share the existing master connection (no new connection!)
                         if hasattr(self.pixhawk.vehicle, '_master'):
                             mavlink_master = self.pixhawk.vehicle._master
-                        else:
-                            # For simulation mode or when _master not available
-                            from pymavlink import mavutil
-                            mavlink_master = mavutil.mavlink_connection(
-                                self.pixhawk.connection_string,
-                                baud=self.pixhawk.baud_rate
+                            
+                            self.mavlink_receiver = MAVLinkCommandReceiver(
+                                mavlink_master,
+                                callback=self._handle_mavlink_command
                             )
-                        
-                        self.mavlink_receiver = MAVLinkCommandReceiver(
-                            mavlink_master,
-                            callback=self._handle_mavlink_command
-                        )
-                        self.mavlink_receiver.start()
-                        print("✅ MAVLink Command Receiver initialized - Long range control enabled!")
+                            self.mavlink_receiver.start()
+                            print("✅ MAVLink Command Receiver initialized - Long range control enabled!")
+                        else:
+                            print("⚠️  Vehicle._master not available, skipping command receiver")
+                            self.mavlink_receiver = None
                     except Exception as e:
                         print(f"⚠️  MAVLink Command Receiver failed to initialize: {e}")
                         self.mavlink_receiver = None
                 else:
-                    print("⚠️  MAVLink Command Receiver not available")
+                    if not mavlink_command_config.get('enabled', False):
+                        print("⚠️  MAVLink Command Receiver disabled in config (prevents serial port conflicts)")
+                    else:
+                        print("⚠️  MAVLink Command Receiver not available")
                 
                 # Initialize MAVLink Detection Sender if available
                 if MAVLINK_DETECTION_SENDER_AVAILABLE and self.pixhawk.vehicle:
                     print("📡 Initializing MAVLink Detection Sender...")
                     try:
+                        # Share the existing master connection (no new connection!)
                         if hasattr(self.pixhawk.vehicle, '_master'):
                             mavlink_master = self.pixhawk.vehicle._master
-                        else:
-                            from pymavlink import mavutil
-                            mavlink_master = mavutil.mavlink_connection(
-                                self.pixhawk.connection_string,
-                                baud=self.pixhawk.baud_rate
+                            
+                            self.mavlink_detection_sender = MAVLinkDetectionSender(
+                                mavlink_master,
+                                enabled=config.get('mavlink_detection', {}).get('enabled', True)
                             )
-                        
-                        self.mavlink_detection_sender = MAVLinkDetectionSender(
-                            mavlink_master,
-                            enabled=config.get('mavlink_detection', {}).get('enabled', True)
-                        )
-                        print("✅ MAVLink Detection Sender initialized - Hybrid transmission enabled!")
+                            print("✅ MAVLink Detection Sender initialized - Hybrid transmission enabled!")
+                        else:
+                            print("⚠️  Vehicle._master not available, skipping detection sender")
+                            self.mavlink_detection_sender = None
                     except Exception as e:
                         print(f"⚠️  MAVLink Detection Sender failed to initialize: {e}")
                         self.mavlink_detection_sender = None

@@ -39,6 +39,10 @@
     "component_id": 191,
     "note": "TELEM2 at 921600 baud (high-speed). Activates when GCS connects to TELEM1."
   },
+  "mavlink_command_receiver": {
+    "enabled": false,
+    "note": "DISABLED - Conflicts with dronekit's message receiver. Use Socket.IO for Pi control instead."
+  },
   "mavlink_detection": {
     "enabled": true,
     "description": "Hybrid detection transmission - Socket.IO primary + MAVLink fallback",
