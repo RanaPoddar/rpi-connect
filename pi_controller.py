@@ -1483,7 +1483,14 @@ def handle_command(data):
 def handle_stats_request(data):
     """Send system stats"""
     stats = controller.get_system_stats()
+    
+    # Send via Socket.IO
     sio.emit('system_stats', {'pi_id': PI_ID, 'stats': stats})
+    
+    # Also send via MAVLink for dual-channel reliability
+    if controller.mavlink_detection_sender:
+        controller.mavlink_detection_sender.send_system_stats(stats)
+        print(f"📡 System stats sent via both Socket.IO and MAVLink")
 
 @sio.on('start_stream')
 def handle_start_stream(data):
@@ -1933,11 +1940,29 @@ def main():
         sio.connect(SERVER_URL)
         
         # Send stats periodically
+        stats_counter = 0
         while controller.is_running:
             time.sleep(10)
+            stats_counter += 1
+            stats = controller.get_system_stats()
+            
+            # Try Socket.IO first (WiFi)
             if sio.connected:
-                stats = controller.get_system_stats()
                 sio.emit('system_stats', {'pi_id': PI_ID, 'stats': stats})
+                print(f"📊 System stats sent via Socket.IO (WiFi)")
+            # Fallback to MAVLink if out of WiFi range
+            elif controller.mavlink_detection_sender:
+                success = controller.mavlink_detection_sender.send_system_stats(stats)
+                if success:
+                    print(f"📡 System stats sent via MAVLink (out of WiFi range)")
+                else:
+                    print(f"⚠️  Failed to send system stats (no connectivity)")
+            
+            # Send system stats via MAVLink every 60 seconds (every 6th cycle) even when WiFi is available
+            # This ensures GCS has dual-channel visibility for reliability monitoring
+            if stats_counter % 6 == 0 and controller.mavlink_detection_sender:
+                controller.mavlink_detection_sender.send_system_stats(stats)
+                print(f"📡 System stats also sent via MAVLink (periodic dual transmission)")
     
     except KeyboardInterrupt:
         print("\nShutting down...")

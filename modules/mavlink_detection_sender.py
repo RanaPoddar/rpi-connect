@@ -211,6 +211,39 @@ class MAVLinkDetectionSender:
             print(f"❌ MAVLink image metadata send failed: {e}")
             return False
     
+    def send_system_stats(self, stats: Dict) -> bool:
+        """
+        Send Pi system statistics over MAVLink telemetry
+        Enables monitoring of Pi health when out of WiFi range
+        
+        Args:
+            stats: System statistics dictionary (CPU, memory, disk, temp)
+            
+        Returns:
+            True if sent successfully
+        """
+        if not self.enabled or not self.master:
+            return False
+            
+        try:
+            # Extract system stats (compact format for 50-char limit)
+            cpu = stats.get('cpu_usage', 0.0)
+            mem = stats.get('memory_usage', 0.0)
+            disk = stats.get('disk_usage', 0.0)
+            temp = stats.get('cpu_temp', 0.0)
+            
+            # Format: STAT|CPU|MEM|DISK|TEMP
+            message = f"STAT|{cpu:.1f}|{mem:.1f}|{disk:.1f}|{temp:.1f}"
+            
+            self._send_statustext(message, self.SEVERITY_INFO)
+            print(f"📡 MAVLink: Sent system stats (CPU:{cpu:.1f}% MEM:{mem:.1f}% TEMP:{temp:.1f}°C)")
+            
+            return True
+            
+        except Exception as e:
+            print(f"❌ MAVLink system stats send failed: {e}")
+            return False
+    
     def _send_statustext(self, text: str, severity: int = SEVERITY_INFO):
         """
         Send STATUSTEXT message over MAVLink
