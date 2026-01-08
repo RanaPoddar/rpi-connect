@@ -31,13 +31,13 @@
   "pixhawk": {
     "enabled": true,
     "connection_string": "/dev/serial0",
-    "baud_rate": 57600,
+    "baud_rate": 921600,
     "simulation_mode": false,
     "update_rate": 10.0,
     "read_only": true,
     "system_id": 255,
     "component_id": 191,
-    "note": "GPIO serial connection at 57600 baud. Read-only mode prevents conflicts with GCS."
+    "note": "TELEM2 at 921600 baud (high-speed). Activates when GCS connects to TELEM1."
   },
   "mavlink_detection": {
     "enabled": true,
