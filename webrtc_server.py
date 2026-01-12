@@ -7,6 +7,7 @@ Handles WebRTC signaling and peer connections
 import asyncio
 import json
 import logging
+import fractions
 from aiohttp import web
 import socketio
 from aiortc import RTCPeerConnection, RTCSessionDescription, VideoStreamTrack
@@ -40,6 +41,8 @@ class PiCameraTrack(VideoStreamTrack):
         super().__init__()
         self.camera = None
         self.is_running = False
+        self._timestamp = 0
+        self._start_time = time.time()
         
     async def start(self):
         """Start camera capture"""
@@ -51,8 +54,10 @@ class PiCameraTrack(VideoStreamTrack):
             self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
             self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
             self.camera.set(cv2.CAP_PROP_FPS, 30)
+            self.camera.set(cv2.CAP_PROP_BUFFERSIZE, 1)
             
             self.is_running = True
+            self._start_time = time.time()
             logger.info("Camera started successfully")
             return True
         except Exception as e:
@@ -61,26 +66,32 @@ class PiCameraTrack(VideoStreamTrack):
     
     async def recv(self):
         """Receive next video frame"""
-        pts, time_base = await self.next_timestamp()
-        
         if not self.camera or not self.is_running:
             # Return blank frame if camera not available
             frame = np.zeros((720, 1280, 3), dtype=np.uint8)
             new_frame = VideoFrame.from_ndarray(frame, format='bgr24')
-            new_frame.pts = pts
-            new_frame.time_base = time_base
+            new_frame.pts = self._timestamp
+            new_frame.time_base = fractions.Fraction(1, 30)
+            self._timestamp += 1
+            await asyncio.sleep(1/30)  # 30 FPS
             return new_frame
         
+        # Read frame from camera
         ret, frame = self.camera.read()
         
-        if not ret:
+        if not ret or frame is None:
+            logger.warning("Failed to read frame from camera")
             # Return blank frame on error
             frame = np.zeros((720, 1280, 3), dtype=np.uint8)
         
         # Convert to VideoFrame
         new_frame = VideoFrame.from_ndarray(frame, format='bgr24')
-        new_frame.pts = pts
-        new_frame.time_base = time_base
+        new_frame.pts = self._timestamp
+        new_frame.time_base = fractions.Fraction(1, 30)
+        self._timestamp += 1
+        
+        # Small delay to maintain frame rate
+        await asyncio.sleep(1/30)  # 30 FPS
         
         return new_frame
     
