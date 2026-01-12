@@ -15,14 +15,18 @@ class GeoLocationCalculator:
     
     # Camera parameters for Raspberry Pi HQ Camera + 6mm lens widr angle
     CAMERA_PARAMS = {
-        'sensor_width_mm': 7.9,       # Sony IMX477 sensor width in mm
-        'sensor_height_mm': 6.0,      # Sony IMX477 sensor height in mm
+        'sensor_width_mm': 7.9,       # IMX477 width in mm
+        'sensor_height_mm': 6.0,      # IMX477 height in mm
         'focal_length_mm': 6.0,       # 6mm ultra wide lens
         'image_width_px': 4056,       # Image width in pixels (12.3 MP)
         'image_height_px': 3040,      # Image height in pixels
         'fov_horizontal_deg': 66.7,   # Calculated: 2*arctan(7.9/(2*6))
         'fov_vertical_deg': 53.1      # Calculated: 2*arctan(6.0/(2*6))
     }
+    
+    # Camera mount configuration
+    # -90° = bottom-facing (straight down), 0° = forward-facing
+    CAMERA_MOUNT_PITCH_DEG = -90.0  # Fixed bottom-facing mount
     
     def __init__(self, camera_params: dict = None):
         """
@@ -100,15 +104,31 @@ class GeoLocationCalculator:
         
         Args:
             altitude_agl: Altitude above ground (meters)
-            pitch_deg: Camera pitch angle (degrees)
+            pitch_deg: Camera pitch angle in world frame (degrees)
+                      -90° = straight down, 0° = horizontal
         
         Returns:
             Tuple of (width_meters, height_meters) of ground coverage
         """
         
-        # Adjust altitude for pitch
+        # For bottom-facing cameras (near -90°), use direct calculation
+        # cos(-90°) = 0 would cause division issues, so handle specially
         pitch_rad = math.radians(pitch_deg)
-        effective_altitude = altitude_agl / math.cos(pitch_rad)
+        
+        # If camera is nearly pointing straight down (within 15° of vertical)
+        # This covers typical drone pitch variations in AUTO mode
+        if abs(pitch_deg + 90) < 15:  # -75° to -105° range
+            # Direct downward view: use altitude directly
+            # For small deviations from vertical, the error is negligible
+            effective_altitude = altitude_agl
+        else:
+            # Angled view: adjust for pitch (standard photogrammetry)
+            # Used only if drone is pitched extremely (>15° from level)
+            cos_pitch = math.cos(pitch_rad)
+            if abs(cos_pitch) < 0.01:  # Avoid division by near-zero
+                effective_altitude = altitude_agl
+            else:
+                effective_altitude = altitude_agl / abs(cos_pitch)
         
         # Calculate ground dimensions using field of view
         # GSD (Ground Sampling Distance) formula
@@ -179,21 +199,25 @@ class GeoLocationCalculator:
         # Convert angles to radians
         heading_rad = math.radians(heading_deg)
         
-        # Rotate by heading (yaw)
-        # In camera frame: X=right, Y=forward
-        # Rotate to ground frame: North-East coordinate system
+        # CRITICAL: Correct rotation from camera frame to geographic frame
+        # Camera frame: X=right, Y=forward (in direction camera faces)
+        # Geographic frame: X=East, Y=North
+        # Heading: 0°=North, 90°=East, 180°=South, 270°=West (clockwise)
+        
         cos_h = math.cos(heading_rad)
         sin_h = math.sin(heading_rad)
         
-        # Rotation matrix application
-        rotated_x = offset_x * cos_h - offset_y * sin_h
-        rotated_y = offset_x * sin_h + offset_y * cos_h
+        # Rotation matrix (2D) - corrected for proper coordinate mapping:
+        # When heading=0° (North): camera forward(Y) → North(Y), camera right(X) → East(X)
+        # When heading=90° (East): camera forward(Y) → East(X), camera right(X) → South(-Y)
+        rotated_east = offset_x * cos_h + offset_y * sin_h   # X → East
+        rotated_north = -offset_x * sin_h + offset_y * cos_h  # Y → North
         
         # Note: For more accuracy, pitch and roll corrections could be added
         # but for typical agricultural drone operations with stable flight,
         # heading rotation is the primary correction needed
         
-        return rotated_x, rotated_y
+        return rotated_east, rotated_north
     
     def _meters_to_gps(
         self,

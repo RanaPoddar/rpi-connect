@@ -10,16 +10,16 @@
   },
   "detection": {
     "enabled": true,
-    "yellow_hsv_lower": [20, 90, 60],
-    "yellow_hsv_upper": [30, 255, 255],
+    "yellow_hsv_lower": [20, 80, 60],
+    "yellow_hsv_upper": [32, 255, 255],
     "min_contour_area": 150,
-    "confidence_threshold": 0.45,
+    "confidence_threshold": 0.50,
     "detection_cooldown": 2.0,
     "auto_detect_in_auto_mode": true,
     "save_detection_images": true,
     "adaptive_threshold": false,
     "debug_mode": false,
-    "note": "Competition tuned v2: STRICT yellow-only detection. H(20-30)=pure yellow, S(90+)=vivid saturation (rejects pale colors), V(60+)=visible brightness. Removed adaptive threshold. Selective saturation boost only in yellow hue range prevents false positives on other colors."
+    "note": "Yellow paper plant detection: H(20-32)=pure yellow only, S(80+)=vivid colors only, V(60+)=bright regions. Excludes green plants and shadows."
   },
   "periodic_capture": {
     "enabled": true,
@@ -34,10 +34,10 @@
     "baud_rate": 921600,
     "simulation_mode": false,
     "update_rate": 10.0,
-    "read_only": true,
+    "read_only": false,
     "system_id": 255,
     "component_id": 191,
-    "note": "TELEM2 at 921600 baud (high-speed). Activates when GCS connects to TELEM1."
+    "note": "TELEM2 at 921600 baud (high-speed). read_only=false allows detection transmission to GCS."
   },
   "mavlink_command_receiver": {
     "enabled": false,

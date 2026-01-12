@@ -15,7 +15,7 @@ def connect_pixhawk(connection_string, baud):
     
     print("Waiting for heartbeat...")
     master.wait_heartbeat()
-    print(f"✅ Connected to system {master.target_system}, component {master.target_component}")
+    print(f" Connected to system {master.target_system}, component {master.target_component}")
     return master
 
 def get_parameter(master, param_name):

@@ -440,8 +440,13 @@ class PiController:
                         altitude_agl = gps_data.get('relative_alt', 0.0)  # Altitude above ground
                         attitude = telemetry.get('attitude', {})
                         heading_deg = telemetry.get('heading', 0.0)
-                        pitch_deg = attitude.get('pitch', 0.0)
-                        roll_deg = attitude.get('roll', 0.0)
+                        vehicle_pitch_deg = attitude.get('pitch', 0.0)  # Vehicle pitch
+                        vehicle_roll_deg = attitude.get('roll', 0.0)    # Vehicle roll
+                        
+                        # Calculate effective camera pitch (vehicle pitch + camera mount offset)
+                        # Camera is fixed bottom-facing at -90° relative to vehicle
+                        camera_pitch_deg = vehicle_pitch_deg + self.geo_calculator.CAMERA_MOUNT_PITCH_DEG
+                        camera_roll_deg = vehicle_roll_deg  # Roll passes through
                         
                         # Convert pixel coordinates to ground GPS using photogrammetry
                         ground_lat, ground_lon = self.geo_calculator.pixel_to_gps(
@@ -451,8 +456,8 @@ class PiController:
                             drone_lon=drone_lon,
                             altitude_agl=altitude_agl,
                             heading_deg=heading_deg,
-                            pitch_deg=pitch_deg,
-                            roll_deg=roll_deg
+                            pitch_deg=camera_pitch_deg,  # Camera pitch in world frame
+                            roll_deg=camera_roll_deg
                         )
                         
                         detection.latitude = ground_lat
@@ -461,7 +466,7 @@ class PiController:
                         
                         print(f"📍 [{self.current_mission_id}] Photogrammetry: Pixel({detection.centroid[0]:.0f},{detection.centroid[1]:.0f}) "
                               f"→ GPS({ground_lat:.7f},{ground_lon:.7f}) | "
-                              f"Alt:{altitude_agl:.1f}m, Hdg:{heading_deg:.1f}°")
+                              f"Alt:{altitude_agl:.1f}m, Hdg:{heading_deg:.1f}°, CamPitch:{camera_pitch_deg:.1f}°")
                         
                     except Exception as e:
                         print(f"⚠️  Photogrammetry calculation failed: {e}, using drone GPS")
