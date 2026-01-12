@@ -4,6 +4,9 @@ Raspberry Pi Controller - Runs on the Pi to receive commands via Socket.IO
 Handles camera, system control, WebRTC streaming, and drone telemetry
 """
 
+# Python 3.10+ compatibility fix for dronekit - MUST be imported first
+import fix_collections
+
 import socketio
 import json
 import subprocess
