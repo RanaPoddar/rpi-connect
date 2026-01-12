@@ -480,30 +480,20 @@ class PiController:
                     detection.longitude = gps_data.get('lon', 0.0)
                     detection.altitude = gps_data.get('relative_alt', 0.0)
                 
-                # Extract detection region from frame
-                x, y, w, h = detection.bbox
-                detection_image = frame[y:y+h, x:x+w]
-                
-                # Encode detection image
-                import cv2
-                _, buffer = cv2.imencode('.jpg', detection_image, [cv2.IMWRITE_JPEG_QUALITY, 85])
-                image_data = base64.b64encode(buffer).decode('utf-8')
-                
-                # Prepare detection data
+                # Prepare detection data (metadata only, no image)
                 detection_data = detection.to_dict()
                 detection_data.update({
                     'detection_id': unique_id,
                     'mission_id': self.current_mission_id,
                     'pi_id': PI_ID,
                     'timestamp': timestamp,
-                    'image': image_data,
                     'drone_mode': telemetry.get('mode', 'UNKNOWN'),
                     'simulation': telemetry.get('simulation', False),
                     'heading': telemetry.get('heading'),
                     'ground_speed': telemetry.get('groundspeed')
                 })
                 
-                # Send to server via Socket.IO (WiFi/LTE)
+                # Send to server via Socket.IO (WiFi/LTE) - metadata only
                 socketio_sent = False
                 if sio.connected:
                     try:
