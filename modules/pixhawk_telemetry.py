@@ -249,9 +249,14 @@ class PixhawkTelemetry:
                 loc = self.vehicle.location.global_relative_frame
                 self.telemetry_data['gps']['lat'] = loc.lat or 0.0
                 self.telemetry_data['gps']['lon'] = loc.lon or 0.0
-                self.telemetry_data['gps']['alt'] = loc.alt or 0.0
-                # relative_alt should ALSO use global_relative_frame (altitude above ground level)
-                self.telemetry_data['gps']['relative_alt'] = loc.alt or 0.0
+                
+                # Get raw altitude and clamp to 0 if on ground (handles barometer drift)
+                raw_alt = loc.alt or 0.0
+                # Clamp negative values near ground to 0 (barometer can drift slightly)
+                clamped_alt = max(0.0, raw_alt) if raw_alt > -1.0 else 0.0
+                
+                self.telemetry_data['gps']['alt'] = clamped_alt
+                self.telemetry_data['gps']['relative_alt'] = clamped_alt
             
             # Absolute altitude (MSL - Mean Sea Level) from global_frame if needed
             if self.vehicle.location.global_frame:
@@ -302,7 +307,11 @@ class PixhawkTelemetry:
                 loc = self.vehicle.location.global_relative_frame
                 self.telemetry_data['gps']['lat'] = loc.lat or 0.0
                 self.telemetry_data['gps']['lon'] = loc.lon or 0.0
-                self.telemetry_data['gps']['alt'] = loc.alt or 0.0
+                
+                # Clamp altitude to 0 if near ground (handles barometer drift)
+                raw_alt = loc.alt or 0.0
+                clamped_alt = max(0.0, raw_alt) if raw_alt > -1.0 else 0.0
+                self.telemetry_data['gps']['alt'] = clamped_alt
     
     def _update_attitude_data(self):
         """Update attitude data from vehicle"""

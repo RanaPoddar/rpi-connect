@@ -54,12 +54,13 @@
     "geofence_enabled": true,
     "geofence_radius": 500,
     "geofence_max_altitude": 120,
-    "geofence_min_altitude": 2,
+    "geofence_min_altitude": 0.5,
     "battery_rtl_threshold": 25,
     "battery_land_threshold": 15,
     "battery_critical_voltage": 13.5,
     "connection_timeout": 10,
-    "telemetry_timeout": 5
+    "telemetry_timeout": 5,
+    "note": "min_altitude reduced to 0.5m to allow landing. Geofence checks are automatically disabled during RTL/LAND modes."
   },
   "webrtc": {
     "enabled": true,

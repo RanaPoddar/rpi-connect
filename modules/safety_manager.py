@@ -388,8 +388,11 @@ class SafetyManager:
                 # Update telemetry timestamp
                 self.update_telemetry_timestamp()
                 
-                # Check geofence
-                if self.geofence_enabled and telemetry.get('armed', False):
+                # Check geofence (skip if in RTL, LAND, or other return/landing modes)
+                flight_mode = telemetry.get('flight_mode', '').upper()
+                landing_modes = ['RTL', 'LAND', 'AUTO_RTL', 'QRTL', 'QLAND']  # Modes where low altitude is expected
+                
+                if self.geofence_enabled and telemetry.get('armed', False) and flight_mode not in landing_modes:
                     gps = telemetry.get('gps', {})
                     lat = gps.get('lat', 0)
                     lon = gps.get('lon', 0)
