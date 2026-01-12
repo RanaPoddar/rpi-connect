@@ -51,8 +51,9 @@ class PixhawkTelemetry:
             'gps': {
                 'lat': 0.0,
                 'lon': 0.0,
-                'alt': 0.0,
-                'relative_alt': 0.0,
+                'alt': 0.0,              # Altitude above ground (AGL) - same as relative_alt
+                'relative_alt': 0.0,     # Altitude above ground (AGL) - relative to home/takeoff point
+                'alt_msl': 0.0,          # Altitude above Mean Sea Level (MSL) - absolute altitude
                 'satellites': 0,
                 'fix_type': 0,
                 'hdop': 0.0
@@ -249,9 +250,12 @@ class PixhawkTelemetry:
                 self.telemetry_data['gps']['lat'] = loc.lat or 0.0
                 self.telemetry_data['gps']['lon'] = loc.lon or 0.0
                 self.telemetry_data['gps']['alt'] = loc.alt or 0.0
+                # relative_alt should ALSO use global_relative_frame (altitude above ground level)
+                self.telemetry_data['gps']['relative_alt'] = loc.alt or 0.0
             
+            # Absolute altitude (MSL - Mean Sea Level) from global_frame if needed
             if self.vehicle.location.global_frame:
-                self.telemetry_data['gps']['relative_alt'] = self.vehicle.location.global_frame.alt or 0.0
+                self.telemetry_data['gps']['alt_msl'] = self.vehicle.location.global_frame.alt or 0.0
             
             # GPS quality
             if self.vehicle.gps_0:

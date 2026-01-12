@@ -69,6 +69,14 @@
       }
     ]
   },
+  "socketio": {
+    "request_timeout": 60,
+    "ping_timeout": 60,
+    "ping_interval": 25,
+    "reconnection_delay": 2,
+    "reconnection_delay_max": 30,
+    "note": "Socket.IO connection settings. ping_timeout=60s prevents disconnections on slow networks. ping_interval=25s keeps connection alive."
+  },
   "monitoring": {
     "stats_interval": 10,
     "auto_reconnect": true

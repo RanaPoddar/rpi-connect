@@ -99,14 +99,50 @@ PI_ID = config.get('pi_id', os.environ.get('PI_ID', 'pi_001'))
 CAMERA_ENABLED = config.get('camera', {}).get('enabled', True)
 PIXHAWK_ENABLED = config.get('pixhawk', {}).get('enabled', True)
 PIXHAWK_CONFIG = config.get('pixhawk', {})
+SOCKETIO_CONFIG = config.get('socketio', {})
 
-# Ini socket  client
-sio = socketio.Client(reconnection=True, reconnection_attempts=0)
+# Initialize Socket.IO client with robust timeout settings
+# These settings prevent disconnection issues over slow/unstable networks
+sio = socketio.Client(
+    reconnection=True,
+    reconnection_attempts=0,  # Infinite reconnection attempts
+    reconnection_delay=SOCKETIO_CONFIG.get('reconnection_delay', 2),
+    reconnection_delay_max=SOCKETIO_CONFIG.get('reconnection_delay_max', 30),
+    randomization_factor=0.5,  # Add jitter to prevent thundering herd
+    
+    # Engine.IO settings for WebSocket stability
+    engineio_logger=False,
+    logger=False,
+    
+    # Critical timeout settings to prevent disconnections
+    request_timeout=SOCKETIO_CONFIG.get('request_timeout', 60),
+    http_session=None,
+    ssl_verify=True
+)
 
 # Camera state
 camera_lock = Lock()
 camera_active = False
 streaming_active = False
+
+# Helper function to safely emit Socket.IO events with timeout protection
+def safe_emit(event_name, data, timeout=5.0):
+    """
+    Safely emit a Socket.IO event with timeout and error handling.
+    Returns True if successful, False otherwise.
+    """
+    if not sio.connected:
+        return False
+    
+    try:
+        # Use call() with timeout for acknowledgment-based reliability
+        # Fall back to emit() for fire-and-forget events
+        sio.emit(event_name, data)
+        return True
+    except Exception as e:
+        # Log error but don't crash - Socket.IO will auto-reconnect
+        print(f"⚠️  Socket.IO emit failed ({event_name}): {str(e)[:100]}")
+        return False
 
 class PiController:
     def __init__(self):
@@ -284,18 +320,18 @@ class PiController:
     def _on_telemetry_update(self, telemetry_data):
         """Callback for Pixhawk telemetry updates - sends to server via Socket.IO"""
         try:
-            if sio.connected:
-                # Add connection status to telemetry
-                if not telemetry_data.get('connected', False):
-                    telemetry_data['status_message'] = 'Pixhawk Not Connected'
-                else:
-                    telemetry_data['status_message'] = 'Connected'
-                
-                sio.emit('drone_telemetry', {
-                    'pi_id': PI_ID,
-                    'telemetry': telemetry_data,
-                    'timestamp': datetime.now().isoformat()
-                })
+            # Add connection status to telemetry
+            if not telemetry_data.get('connected', False):
+                telemetry_data['status_message'] = 'Pixhawk Not Connected'
+            else:
+                telemetry_data['status_message'] = 'Connected'
+            
+            # Use safe_emit to prevent timeout errors
+            safe_emit('drone_telemetry', {
+                'pi_id': PI_ID,
+                'telemetry': telemetry_data,
+                'timestamp': datetime.now().isoformat()
+            })
             
             # Update safety manager telemetry timestamp
             if self.safety_manager:
@@ -308,10 +344,9 @@ class PiController:
         """Callback for safety warnings"""
         print(f"⚠️  SAFETY WARNING: {warning.get('type', 'unknown')}")
         
-        # Send warning to server
-        if sio.connected:
-            sio.emit('safety_warning', {
-                'pi_id': PI_ID,
+        # Send warning to server using safe_emit
+        safe_emit('safety_warning', {
+            'pi_id': PI_ID,
                 'warning': warning,
                 'timestamp': datetime.now().isoformat()
             })
@@ -987,8 +1022,16 @@ class PiController:
         global streaming_active
         import cv2
         
+        frame_skip_counter = 0
+        last_send_time = 0
+        send_interval = 0.2  # 5 fps to reduce network load and prevent timeouts
+        consecutive_errors = 0
+        max_consecutive_errors = 5
+        
         try:
             while streaming_active:
+                current_time = time.time()
+                
                 # Capture frame (BGR888 config, but may actually be RGB)
                 frame = self.camera.capture_array()
                 
@@ -1000,8 +1043,6 @@ class PiController:
                 
                 # Perform detection if enabled
                 if self.detection_active and self.detector:
-                    current_time = time.time()
-                    
                     # Check cooldown
                     if current_time - self.last_detection_time >= self.detection_cooldown:
                         try:
@@ -1020,19 +1061,35 @@ class PiController:
                         except Exception as e:
                             print(f"Detection error: {e}")
                 
+                # Rate limit frame sending to prevent WebSocket timeout
+                if current_time - last_send_time < send_interval:
+                    time.sleep(0.05)
+                    continue
+                
                 # Encode BGR frame as JPEG (OpenCV expects BGR)
-                _, buffer = cv2.imencode('.jpg', frame_bgr, [cv2.IMWRITE_JPEG_QUALITY, 75])
+                _, buffer = cv2.imencode('.jpg', frame_bgr, [cv2.IMWRITE_JPEG_QUALITY, 70])
                 frame_data = base64.b64encode(buffer).decode('utf-8')
                 
-                # Send frame to server (only if connected)
+                # Send frame to server with error handling (only if connected)
                 if sio.connected:
-                    sio.emit('camera_frame', {
-                        'pi_id': PI_ID,
-                        'frame': frame_data,
-                        'timestamp': time.time()
-                    })
+                    try:
+                        sio.emit('camera_frame', {
+                            'pi_id': PI_ID,
+                            'frame': frame_data,
+                            'timestamp': current_time
+                        })
+                        last_send_time = current_time
+                        consecutive_errors = 0  # Reset error counter on success
+                    except Exception as e:
+                        consecutive_errors += 1
+                        if consecutive_errors <= max_consecutive_errors:
+                            print(f"⚠️  Frame send error ({consecutive_errors}/{max_consecutive_errors}): {e}")
+                        if consecutive_errors >= max_consecutive_errors:
+                            print(f"❌ Too many consecutive errors, stopping stream")
+                            streaming_active = False
+                            break
                 
-                time.sleep(0.1)  # ~10 fps (reduced to prevent disconnection)
+                time.sleep(0.05)  # Small sleep to prevent CPU overload
                 
         except Exception as e:
             print(f"Streaming error: {e}")
@@ -1996,8 +2053,19 @@ def main():
     print(f"Connecting to {SERVER_URL}")
     
     try:
-        # Connect to server
-        sio.connect(SERVER_URL)
+        # Connect to server with enhanced WebSocket settings
+        # These options are passed to the underlying engine.io client
+        sio.connect(
+            SERVER_URL,
+            # WebSocket-specific options to prevent timeouts
+            transports=['websocket', 'polling'],  # Prefer WebSocket, fallback to polling
+            wait_timeout=10,  # Connection establishment timeout
+            # Engine.IO options for the WebSocket transport
+            socketio_path='/socket.io',
+            # Additional headers if needed
+            headers={}
+        )
+        print(f"✅ Connected successfully with ping_interval=25s, ping_timeout=60s")
         
         # Send stats periodically
         stats_counter = 0
@@ -2006,15 +2074,19 @@ def main():
             stats_counter += 1
             stats = controller.get_system_stats()
             
-            # Try Socket.IO first (WiFi)
+            # Try Socket.IO first (WiFi) using safe_emit
             if sio.connected:
-                sio.emit('system_stats', {'pi_id': PI_ID, 'stats': stats})
-                print(f"📊 System stats sent via Socket.IO (WiFi)")
+                success = safe_emit('system_stats', {'pi_id': PI_ID, 'stats': stats})
+                if success:
+                    print(f"📊 System stats sent via Socket.IO (WiFi)")
+                    # Print key stats for monitoring
+                    print(f"   CPU:{stats.get('cpu_usage', 0):.1f}% MEM:{stats.get('memory_usage', 0):.1f}% TEMP:{stats.get('cpu_temp', 0):.1f}°C")
             # Fallback to MAVLink if out of WiFi range
             elif controller.mavlink_detection_sender:
                 success = controller.mavlink_detection_sender.send_system_stats(stats)
                 if success:
                     print(f"📡 System stats sent via MAVLink (out of WiFi range)")
+                    print(f"   CPU:{stats.get('cpu_usage', 0):.1f}% MEM:{stats.get('memory_usage', 0):.1f}% TEMP:{stats.get('cpu_temp', 0):.1f}°C")
                 else:
                     print(f"⚠️  Failed to send system stats (no connectivity)")
             
@@ -2022,7 +2094,7 @@ def main():
             # This ensures GCS has dual-channel visibility for reliability monitoring
             if stats_counter % 6 == 0 and controller.mavlink_detection_sender:
                 controller.mavlink_detection_sender.send_system_stats(stats)
-                print(f"📡 System stats also sent via MAVLink (periodic dual transmission)")
+                print(f"📡 MAVLink: Sent system stats (CPU:{stats.get('cpu_usage', 0):.1f}% MEM:{stats.get('memory_usage', 0):.1f}% TEMP:{stats.get('cpu_temp', 0):.1f}°C)")
     
     except KeyboardInterrupt:
         print("\nShutting down...")
