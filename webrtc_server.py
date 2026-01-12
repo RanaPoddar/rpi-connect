@@ -8,6 +8,7 @@ import asyncio
 import json
 import logging
 import fractions
+import os
 from aiohttp import web
 import socketio
 from aiortc import RTCPeerConnection, RTCSessionDescription, VideoStreamTrack
@@ -16,6 +17,16 @@ from av import VideoFrame
 import numpy as np
 import cv2
 import time
+
+# Import detection modules
+try:
+    from modules.yellow_crop_detector import YellowCropDetector
+    from modules.mavlink_detection_sender import MAVLinkDetectionSender
+    from pymavlink import mavutil
+    DETECTION_AVAILABLE = True
+except ImportError as e:
+    DETECTION_AVAILABLE = False
+    print(f"Detection modules not available: {e}")
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -29,20 +40,26 @@ sio = socketio.AsyncServer(
     ping_interval=25
 )
 
-# Store active peer connections
+# Store active peer connections and detection state
 peer_connections = {}
+detection_enabled = False
+detector = None
+mavlink_connection = None
+detection_sender = None
 
 class PiCameraTrack(VideoStreamTrack):
     """
-    Custom video track from Raspberry Pi camera
+    Custom video track from Raspberry Pi camera with optional detection overlay
     """
     
-    def __init__(self):
+    def __init__(self, enable_detection=False):
         super().__init__()
         self.camera = None
         self.is_running = False
         self._timestamp = 0
         self._start_time = time.time()
+        self.enable_detection = enable_detection
+        self.frame_skip = 0  # Skip every other frame for better performance
         
     async def start(self):
         """Start camera capture"""
@@ -50,15 +67,16 @@ class PiCameraTrack(VideoStreamTrack):
             # Try to open Pi camera
             self.camera = cv2.VideoCapture(0)
             
-            # Set camera properties
-            self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
-            self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
-            self.camera.set(cv2.CAP_PROP_FPS, 30)
+            # Set camera properties - reduced resolution for better streaming
+            self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+            self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+            self.camera.set(cv2.CAP_PROP_FPS, 20)
             self.camera.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            self.camera.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
             
             self.is_running = True
             self._start_time = time.time()
-            logger.info("Camera started successfully")
+            logger.info("Camera started successfully (640x480@20fps)")
             return True
         except Exception as e:
             logger.error(f"Failed to start camera: {e}")
@@ -68,12 +86,12 @@ class PiCameraTrack(VideoStreamTrack):
         """Receive next video frame"""
         if not self.camera or not self.is_running:
             # Return blank frame if camera not available
-            frame = np.zeros((720, 1280, 3), dtype=np.uint8)
+            frame = np.zeros((480, 640, 3), dtype=np.uint8)
             new_frame = VideoFrame.from_ndarray(frame, format='bgr24')
             new_frame.pts = self._timestamp
-            new_frame.time_base = fractions.Fraction(1, 30)
+            new_frame.time_base = fractions.Fraction(1, 20)
             self._timestamp += 1
-            await asyncio.sleep(1/30)  # 30 FPS
+            await asyncio.sleep(1/20)  # 20 FPS
             return new_frame
         
         # Read frame from camera
@@ -81,17 +99,29 @@ class PiCameraTrack(VideoStreamTrack):
         
         if not ret or frame is None:
             logger.warning("Failed to read frame from camera")
-            # Return blank frame on error
-            frame = np.zeros((720, 1280, 3), dtype=np.uint8)
+            frame = np.zeros((480, 640, 3), dtype=np.uint8)
+        else:
+            # Apply detection overlay if enabled
+            if self.enable_detection and detector and detection_enabled:
+                try:
+                    detections = detector.detect(frame)
+                    if detections:
+                        for det in detections:
+                            x, y, w, h = det.bbox
+                            cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
+                            cv2.putText(frame, f"{det.confidence:.2f}", (x, y-5),
+                                      cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+                except Exception as e:
+                    logger.error(f"Detection error: {e}")
         
         # Convert to VideoFrame
         new_frame = VideoFrame.from_ndarray(frame, format='bgr24')
         new_frame.pts = self._timestamp
-        new_frame.time_base = fractions.Fraction(1, 30)
+        new_frame.time_base = fractions.Fraction(1, 20)
         self._timestamp += 1
         
-        # Small delay to maintain frame rate
-        await asyncio.sleep(1/30)  # 30 FPS
+        # Maintain frame rate
+        await asyncio.sleep(1/20)  # 20 FPS
         
         return new_frame
     
@@ -205,6 +235,47 @@ async def handle_stop_stream(sid, data):
     
     await sio.emit('stream_status', {'status': 'stopped'}, room=sid)
 
+@sio.on('toggle_detection')
+async def handle_toggle_detection(sid, data):
+    """Toggle detection on/off"""
+    global detection_enabled
+    
+    if not DETECTION_AVAILABLE:
+        await sio.emit('detection_status', {
+            'enabled': False,
+            'error': 'Detection modules not available'
+        }, room=sid)
+        return
+    
+    detection_enabled = data.get('enabled', False)
+    logger.info(f"Detection {'enabled' if detection_enabled else 'disabled'}")
+    
+    await sio.emit('detection_status', {
+        'enabled': detection_enabled,
+        'message': f"Detection {'enabled' if detection_enabled else 'disabled'}"
+    }, room=sid)
+
+@sio.on('toggle_mavlink_detection')
+async def handle_toggle_mavlink_detection(sid, data):
+    """Toggle MAVLink detection transmission"""
+    global detection_sender
+    
+    if not DETECTION_AVAILABLE or not detection_sender:
+        await sio.emit('mavlink_status', {
+            'enabled': False,
+            'error': 'MAVLink detection not available'
+        }, room=sid)
+        return
+    
+    enabled = data.get('enabled', False)
+    detection_sender.enabled = enabled
+    logger.info(f"MAVLink detection {'enabled' if enabled else 'disabled'}")
+    
+    await sio.emit('mavlink_status', {
+        'enabled': enabled,
+        'message': f"MAVLink detection {'enabled' if enabled else 'disabled'}"
+    }, room=sid)
+
 # HTTP routes
 async def index(request):
     """Serve index page"""
@@ -267,6 +338,61 @@ async def index(request):
             .status.connected { background: #4CAF50; }
             .status.disconnected { background: #f44336; }
             .status.connecting { background: #ff9800; }
+            .detection-panel {
+                background: #2a2a2a;
+                padding: 20px;
+                border-radius: 8px;
+                margin: 20px 0;
+            }
+            .detection-panel h3 {
+                margin-top: 0;
+                color: #4CAF50;
+            }
+            .switch-container {
+                display: flex;
+                align-items: center;
+                margin: 10px 0;
+                gap: 10px;
+            }
+            .switch {
+                position: relative;
+                display: inline-block;
+                width: 50px;
+                height: 24px;
+            }
+            .switch input {
+                opacity: 0;
+                width: 0;
+                height: 0;
+            }
+            .slider {
+                position: absolute;
+                cursor: pointer;
+                top: 0;
+                left: 0;
+                right: 0;
+                bottom: 0;
+                background-color: #ccc;
+                transition: .4s;
+                border-radius: 24px;
+            }
+            .slider:before {
+                position: absolute;
+                content: "";
+                height: 18px;
+                width: 18px;
+                left: 3px;
+                bottom: 3px;
+                background-color: white;
+                transition: .4s;
+                border-radius: 50%;
+            }
+            input:checked + .slider {
+                background-color: #4CAF50;
+            }
+            input:checked + .slider:before {
+                transform: translateX(26px);
+            }
         </style>
     </head>
     <body>
@@ -281,6 +407,28 @@ async def index(request):
         <div class="controls">
             <button class="btn-primary" onclick="startStream()">Start Stream</button>
             <button class="btn-danger" onclick="stopStream()">Stop Stream</button>
+        </div>
+        
+        <div class="detection-panel">
+            <h3>🌾 Detection & Telemetry</h3>
+            
+            <div class="switch-container">
+                <label class="switch">
+                    <input type="checkbox" id="detectionToggle" onchange="toggleDetection()">
+                    <span class="slider"></span>
+                </label>
+                <label for="detectionToggle">Enable Yellow Crop Detection</label>
+            </div>
+            
+            <div class="switch-container">
+                <label class="switch">
+                    <input type="checkbox" id="mavlinkToggle" onchange="toggleMavlinkDetection()">
+                    <span class="slider"></span>
+                </label>
+                <label for="mavlinkToggle">Send Detection via MAVLink Telemetry</label>
+            </div>
+            
+            <div id="detectionStatus" style="margin-top: 10px; padding: 5px; font-size: 14px;"></div>
         </div>
         
         <script src="/socket.io/socket.io.js"></script>
@@ -390,11 +538,86 @@ async def index(request):
                 socket.emit('stop_stream');
                 updateStatus('Stream stopped', 'disconnected');
             }
+            
+            // Toggle detection
+            function toggleDetection() {
+                const enabled = document.getElementById('detectionToggle').checked;
+                socket.emit('toggle_detection', { enabled: enabled });
+            }
+            
+            // Toggle MAVLink detection
+            function toggleMavlinkDetection() {
+                const enabled = document.getElementById('mavlinkToggle').checked;
+                socket.emit('toggle_mavlink_detection', { enabled: enabled });
+            }
+            
+            // Listen for detection status
+            socket.on('detection_status', (data) => {
+                const statusDiv = document.getElementById('detectionStatus');
+                if (data.error) {
+                    statusDiv.textContent = '❌ ' + data.error;
+                    statusDiv.style.color = '#f44336';
+                } else {
+                    statusDiv.textContent = '✓ ' + data.message;
+                    statusDiv.style.color = '#4CAF50';
+                }
+            });
+            
+            // Listen for MAVLink status
+            socket.on('mavlink_status', (data) => {
+                const statusDiv = document.getElementById('detectionStatus');
+                if (data.error) {
+                    statusDiv.textContent = '❌ ' + data.error;
+                    statusDiv.style.color = '#f44336';
+                } else {
+                    statusDiv.textContent = '📡 ' + data.message;
+                    statusDiv.style.color = '#4CAF50';
+                }
+            });
         </script>
     </body>
     </html>
     """
     return web.Response(text=html, content_type='text/html')
+
+def init_detection_system():
+    """Initialize detection system if available"""
+    global detector, mavlink_connection, detection_sender
+    
+    if not DETECTION_AVAILABLE:
+        logger.warning("Detection system not available")
+        return
+    
+    try:
+        # Load config
+        config_path = os.path.join(os.path.dirname(__file__), 'config.json')
+        if os.path.exists(config_path):
+            with open(config_path, 'r') as f:
+                config = json.load(f)
+        else:
+            config = {}
+        
+        # Initialize detector
+        detector = YellowCropDetector(config.get('detection', {}))
+        logger.info("✓ Yellow crop detector initialized")
+        
+        # Initialize MAVLink connection if enabled
+        pixhawk_config = config.get('pixhawk', {})
+        if pixhawk_config.get('enabled', False):
+            try:
+                connection_string = pixhawk_config.get('connection_string', '/dev/serial0')
+                baud_rate = pixhawk_config.get('baud_rate', 921600)
+                mavlink_connection = mavutil.mavlink_connection(connection_string, baud=baud_rate)
+                mavlink_connection.wait_heartbeat(timeout=5)
+                
+                # Initialize detection sender
+                mavlink_enabled = config.get('mavlink_detection', {}).get('enabled', True)
+                detection_sender = MAVLinkDetectionSender(mavlink_connection, enabled=mavlink_enabled)
+                logger.info("✓ MAVLink detection sender initialized")
+            except Exception as e:
+                logger.warning(f"MAVLink not available: {e}")
+    except Exception as e:
+        logger.error(f"Failed to initialize detection system: {e}")
 
 # Create aiohttp application
 app = web.Application()
@@ -405,8 +628,12 @@ app.router.add_get('/', index)
 
 def main():
     """Run the server"""
+    # Initialize detection system
+    init_detection_system()
+    
     port = 8080
     logger.info(f"Starting WebRTC server on port {port}")
+    logger.info(f"Detection available: {DETECTION_AVAILABLE}")
     logger.info(f"Open http://localhost:{port} in your browser")
     
     web.run_app(app, host='0.0.0.0', port=port)
