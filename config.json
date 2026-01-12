@@ -53,8 +53,8 @@
   "safety": {
     "geofence_enabled": true,
     "geofence_radius": 500,
-    "geofence_max_altitude": 120,
-    "geofence_min_altitude": 0.5,
+    "geofence_max_altitude": 20,
+    "geofence_min_altitude": -0.5,
     "battery_rtl_threshold": 25,
     "battery_land_threshold": 15,
     "battery_critical_voltage": 13.5,
