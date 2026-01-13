@@ -15,6 +15,8 @@ import numpy as np
 from concurrent.futures import ThreadPoolExecutor
 from queue import Queue
 from threading import Thread
+import signal
+import sys
 
 # Import necessary modules for CV detection and geolocation
 from modules.yellow_crop_detector import YellowCropDetector, CropDetection
@@ -61,6 +63,18 @@ last_detection_time = 0
 
 # Frame buffer for continuous capture
 frame_buffer = Queue(maxsize=5)
+
+# Flag to stop threads gracefully
+stop_threads = False
+
+def signal_handler(sig, frame):
+    global stop_threads
+    print("\nShutting down gracefully...")
+    stop_threads = True
+    sys.exit(0)
+
+# Register signal handler for graceful shutdown
+signal.signal(signal.SIGINT, signal_handler)
 
 def process_detections(detections, telemetry):
     """Process detections, geotag them, and send coordinates over telemetry."""
@@ -129,37 +143,45 @@ def capture_frame():
     frame = cv2.imread("frame.jpg")
     return frame
 
+# Update frame capture to handle retries
 def capture_frames_continuously():
-    cap = cv2.VideoCapture(0)
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+    cap = None
+    while not stop_threads:
+        try:
+            if cap is None or not cap.isOpened():
+                cap = cv2.VideoCapture(0)
+                cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
 
-    while True:
-        ret, frame = cap.read()
-        if ret and not frame_buffer.full():
-            frame_buffer.put(frame)
-        elif not ret:
-            print("Error: Unable to capture frame.")
+            ret, frame = cap.read()
+            if ret and not frame_buffer.full():
+                frame_buffer.put(frame)
+            elif not ret:
+                print("Error: Unable to capture frame. Retrying...")
+        except Exception as e:
+            print(f"Error in frame capture: {e}")
+        finally:
+            time.sleep(0.1)  # Avoid busy-waiting
 
-    cap.release()
+    if cap:
+        cap.release()
 
-# Start frame capture in a separate thread
-capture_thread = Thread(target=capture_frames_continuously, daemon=True)
-capture_thread.start()
-
-# Update main loop to process frames live
-
+# Update frame processing to check stop flag
 def process_frames_live():
-    while True:
+    while not stop_threads:
         if not frame_buffer.empty():
             frame = frame_buffer.get()
             detections = detector.detect(frame)
             process_detections(detections, telemetry)
         else:
             print("No frames available in buffer.")
+        time.sleep(0.1)  # Avoid busy-waiting
 
-# Start frame processing in a separate thread
-processing_thread = Thread(target=process_frames_live, daemon=True)
+# Start threads without daemon mode
+capture_thread = Thread(target=capture_frames_continuously)
+processing_thread = Thread(target=process_frames_live)
+
+capture_thread.start()
 processing_thread.start()
 
 def main():
@@ -189,6 +211,10 @@ def main():
         print("\nShutting down...")
     except Exception as e:
         print(f"❌ Error: {e}")
+
+# Wait for threads to finish
+capture_thread.join()
+processing_thread.join()
 
 if __name__ == '__main__':
     main()
