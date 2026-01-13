@@ -4,17 +4,14 @@ Raspberry Pi Controller - Minimal Version
 Runs a CV detection model, geotags detections, and sends coordinates over telemetry to GCS.
 """
 
+
 import os
 import time
 import json
 from datetime import datetime
-from threading import Lock
 import subprocess
 import cv2
 import numpy as np
-from concurrent.futures import ThreadPoolExecutor
-from queue import Queue
-from threading import Thread
 import signal
 import sys
 
@@ -58,22 +55,13 @@ except Exception as e:
 # Initialize MAVLinkDetectionSender with the master connection
 mavlink_sender = MAVLinkDetectionSender(master)
 
-detection_lock = Lock()
+
 last_detection_time = 0
 
-# Frame buffer for continuous capture
-frame_buffer = Queue(maxsize=5)
-
-# Flag to stop threads gracefully
-stop_threads = False
-
 def signal_handler(sig, frame):
-    global stop_threads
     print("\nShutting down gracefully...")
-    stop_threads = True
     sys.exit(0)
 
-# Register signal handler for graceful shutdown
 signal.signal(signal.SIGINT, signal_handler)
 
 def process_detections(detections, telemetry):
@@ -137,55 +125,32 @@ def decode_mavlink_message():
     except Exception as e:
         print(f"Error decoding MAVLink message: {e}")
 
-# Fallback to rpicam for frame capture
-def capture_frame():
-    subprocess.run(["rpicam-still", "-o", "frame.jpg"])
-    frame = cv2.imread("frame.jpg")
-    return frame
 
-# Update frame capture to handle retries
-def capture_frames_continuously():
-    cap = None
-    while not stop_threads:
-        try:
-            if cap is None or not cap.isOpened():
-                cap = cv2.VideoCapture(0)
-                cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+# Headless rpicam-still frame capture (no -w/-h, resize in Python)
+def capture_frame_and_resize(width=640, height=480):
+    temp_file = 'frame.jpg'
+    cmd = [
+        'rpicam-still',
+        '-o', temp_file,
+        '-t', '1',
+        '-n',
+        '--immediate',
+        '--nopreview'
+    ]
+    try:
+        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        frame = cv2.imread(temp_file)
+        if frame is not None:
+            os.remove(temp_file)
+            frame = cv2.resize(frame, (width, height))
+        return frame
+    except Exception as e:
+        print(f"rpicam-still error: {e}")
+        return None
 
-            ret, frame = cap.read()
-            if ret and not frame_buffer.full():
-                frame_buffer.put(frame)
-            elif not ret:
-                print("Error: Unable to capture frame. Retrying...")
-        except Exception as e:
-            print(f"Error in frame capture: {e}")
-        finally:
-            time.sleep(0.1)  # Avoid busy-waiting
-
-    if cap:
-        cap.release()
-
-# Update frame processing to check stop flag
-def process_frames_live():
-    while not stop_threads:
-        if not frame_buffer.empty():
-            frame = frame_buffer.get()
-            detections = detector.detect(frame)
-            process_detections(detections, telemetry)
-        else:
-            print("No frames available in buffer.")
-        time.sleep(0.1)  # Avoid busy-waiting
-
-# Start threads without daemon mode
-capture_thread = Thread(target=capture_frames_continuously)
-processing_thread = Thread(target=process_frames_live)
-
-capture_thread.start()
-processing_thread.start()
 
 def main():
-    """Main function to run the detection loop."""
+    """Main function to run the headless yellow detection loop."""
     print(f"🚀 Starting Pi Controller for {PI_ID}")
 
     if not DETECTION_ENABLED:
@@ -194,27 +159,47 @@ def main():
 
     print("🌾 Detection enabled. Starting detection immediately...")
 
-    try:
-        # Simulate telemetry data (replace with actual telemetry source)
-        telemetry = {
-            'latitude': 0.0,
-            'longitude': 0.0,
-            'altitude': 0.0
-        }
+    # Simulate telemetry data (replace with actual telemetry source)
+    telemetry = {
+        'latitude': 0.0,
+        'longitude': 0.0,
+        'altitude': 0.0
+    }
 
-        # Main loop only for telemetry and other tasks
+    frame_count = 0
+    save_dir = 'output_frames_detected'
+    os.makedirs(save_dir, exist_ok=True)
+
+    try:
         while True:
-            decode_mavlink_message()
-            time.sleep(0.1)
+            # 1. Capture frame
+            frame = capture_frame_and_resize(width=640, height=480)
+            if frame is None:
+                print("Failed to capture frame with rpicam-still.")
+                continue
+
+            # 2. Run yellow detection
+            detections = detector.detect(frame)
+
+            # 3. Process detections (geotag, send, log)
+            process_detections(detections, telemetry)
+
+            # 4. Optionally, save annotated frame for review
+            if detections:
+                annotated = detector.visualize_detections(frame, detections, show_info=True)
+                out_path = os.path.join(save_dir, f'frame_{frame_count:05d}.jpg')
+                cv2.imwrite(out_path, annotated)
+                print(f"Saved detection frame: {out_path}")
+            frame_count += 1
+
+            # 5. Adjust sleep for drone speed (2m/s):
+            # At 2m/s, 5 fps gives a detection every 0.4m. Adjust as needed.
+            time.sleep(0.2)
 
     except KeyboardInterrupt:
         print("\nShutting down...")
     except Exception as e:
         print(f"❌ Error: {e}")
-
-# Wait for threads to finish
-capture_thread.join()
-processing_thread.join()
 
 if __name__ == '__main__':
     main()
