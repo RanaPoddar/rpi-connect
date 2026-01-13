@@ -90,6 +90,7 @@ class PixhawkTelemetry:
         
         # Callbacks
         self.telemetry_callback = None
+        self.command_callback = None  # For MAVLink command handling
         
         # Simulation data for testing
         self.sim_counter = 0
@@ -259,6 +260,28 @@ class PixhawkTelemetry:
         
         while self.running:
             try:
+                # Check for incoming COMMAND_LONG messages (detection control)
+                if self.vehicle and not self.simulation_mode:
+                    try:
+                        cmd_msg = self.vehicle._master.recv_match(type='COMMAND_LONG', blocking=False)
+                        if cmd_msg:
+                            print(f"📡 Received COMMAND_LONG: command={cmd_msg.command}")
+                            
+                            if cmd_msg.command == 42000:  # Start detection
+                                print("🌾 START DETECTION command (42000)!")
+                                if self.command_callback:
+                                    self.command_callback('start_detection', {})
+                                self._send_command_ack(42000, mavutil.mavlink.MAV_RESULT_ACCEPTED)
+                                
+                            elif cmd_msg.command == 42001:  # Stop detection
+                                print("🛑 STOP DETECTION command (42001)!")
+                                if self.command_callback:
+                                    self.command_callback('stop_detection', {})
+                                self._send_command_ack(42001, mavutil.mavlink.MAV_RESULT_ACCEPTED)
+                    except Exception as e:
+                        pass  # Silently ignore command polling errors
+                
+                # Update telemetry data
                 if self.simulation_mode:
                     self._update_simulated_telemetry()
                 else:
