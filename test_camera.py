@@ -1,21 +1,51 @@
 import cv2
 import numpy as np
+import subprocess
+import os
+import time
+
+def capture_with_rpicam_still(temp_file='frame.jpg', width=640, height=480):
+    cmd = [
+        'rpicam-still',
+        '-o', temp_file,
+        '-t', '1',  # 1 ms timeout for fastest capture
+        '-n',       # No preview
+        '-w', str(width),
+        '-h', str(height),
+        '--immediate',
+        '--nopreview'
+    ]
+    try:
+        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        frame = cv2.imread(temp_file)
+        if frame is not None:
+            os.remove(temp_file)
+        return frame
+    except Exception as e:
+        print(f"rpicam-still error: {e}")
+        return None
 
 def detect_yellow_live(camera_index=0, width=640, height=480):
     cap = cv2.VideoCapture(camera_index)
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+    use_rpicam = False
     if not cap.isOpened():
-        print(f"Camera index {camera_index} could not be opened.")
-        return
+        print(f"Camera index {camera_index} could not be opened. Falling back to rpicam-still.")
+        use_rpicam = True
     print("Press 'q' to quit.")
     while True:
-        ret, frame = cap.read()
-        if not ret:
-            print("Failed to capture frame.")
-            break
-        # Resize for speed
-        frame = cv2.resize(frame, (width, height))
+        if use_rpicam:
+            frame = capture_with_rpicam_still(width=width, height=height)
+            if frame is None:
+                print("Failed to capture frame with rpicam-still.")
+                break
+        else:
+            ret, frame = cap.read()
+            if not ret:
+                print("Failed to capture frame.")
+                break
+            frame = cv2.resize(frame, (width, height))
         # Convert to HSV
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
         # Define yellow color range
@@ -38,7 +68,11 @@ def detect_yellow_live(camera_index=0, width=640, height=480):
         # cv2.imshow('Mask', mask)
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
-    cap.release()
+        # For rpicam-still, add a tiny sleep to avoid overloading CPU
+        if use_rpicam:
+            time.sleep(0.03)  # ~30 fps target
+    if not use_rpicam:
+        cap.release()
     cv2.destroyAllWindows()
 
 if __name__ == "__main__":
