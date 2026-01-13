@@ -38,9 +38,14 @@ geo_calculator = GeoLocationCalculator()
 detector = YellowCropDetector(config=config)
 
 # Establish a connection to the MAVLink system
-master = mavutil.mavlink_connection('/dev/serial0', baud=57600)  # Replace with your connection string
-master.wait_heartbeat()  # Wait for the heartbeat signal to confirm connection
-print("✅ Connected to MAVLink system")
+try:
+    print("Attempting to connect to MAVLink system...")
+    master = mavutil.mavlink_connection(config['pixhawk']['connection_string'], baud=config['pixhawk']['baud_rate'])
+    print("Connection established. Waiting for heartbeat...")
+    master.wait_heartbeat(timeout=30)
+    print("Heartbeat received!")
+except Exception as e:
+    print(f"Error connecting to MAVLink system: {e}")
 
 # Initialize MAVLinkDetectionSender with the master connection
 mavlink_sender = MAVLinkDetectionSender(master)
@@ -86,6 +91,17 @@ def process_detections(detections, telemetry):
         except Exception as e:
             print(f"Error processing detection: {e}")
 
+# Function to decode MAVLink messages
+def decode_mavlink_message():
+    try:
+        message = master.recv_match(blocking=True, timeout=5)
+        if message:
+            print(f"Received MAVLink message: {message.to_dict()}")
+        else:
+            print("No message received within timeout.")
+    except Exception as e:
+        print(f"Error decoding MAVLink message: {e}")
+
 def main():
     """Main function to run the detection loop."""
     print(f"🚀 Starting Pi Controller for {PI_ID}")
@@ -114,6 +130,8 @@ def main():
                 detections = detector.detect(frame)
                 print(f"📸 Detections: {detections}")
                 process_detections(detections, telemetry)
+
+            decode_mavlink_message()
 
             time.sleep(1)  # Adjust loop frequency as needed
 
