@@ -9,13 +9,15 @@ import time
 import json
 from datetime import datetime
 from threading import Lock
+import subprocess
+import cv2
+import numpy as np
 
 # Import necessary modules for CV detection and geolocation
 from modules.yellow_crop_detector import YellowCropDetector, CropDetection
 from modules.geolocation import GeoLocationCalculator
 from modules.mavlink_detection_sender import MAVLinkDetectionSender
 from pymavlink import mavutil
-import cv2
 
 # Load configuration from config.json
 def load_config():
@@ -103,6 +105,12 @@ def decode_mavlink_message():
     except Exception as e:
         print(f"Error decoding MAVLink message: {e}")
 
+# Fallback to rpicam for frame capture
+def capture_frame():
+    subprocess.run(["rpicam-still", "-o", "frame.jpg"])
+    frame = cv2.imread("frame.jpg")
+    return frame
+
 def main():
     """Main function to run the detection loop."""
     print(f"🚀 Starting Pi Controller for {PI_ID}")
@@ -143,7 +151,19 @@ def main():
                         print("Debug mode enabled. Saving detection images...")
                         detector.save_debug_images(frame, detections)
                 else:
-                    print("Error: Unable to capture frame.")
+                    print("Error: Unable to capture frame. Falling back to rpicam...")
+                    frame = capture_frame()
+                    if frame is not None:
+                        print("Frame captured using rpicam. Processing frame for yellow detection...")
+                        detections = detector.detect(frame)
+                        print(f"📸 Detections: {detections}")
+
+                        # Debugging: Save frame and detected regions if debug_mode is enabled
+                        if config['detection']['debug_mode']:
+                            print("Debug mode enabled. Saving detection images...")
+                            detector.save_debug_images(frame, detections)
+                    else:
+                        print("Error: Unable to capture frame using rpicam.")
 
                 process_detections(detections, telemetry)
 
