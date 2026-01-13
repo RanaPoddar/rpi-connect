@@ -24,39 +24,42 @@ def capture_with_rpicam_still(temp_file='frame.jpg'):
         print(f"rpicam-still error: {e}")
         return None
 
-def detect_yellow_live_rpicam(width=640, height=480):
-    print("Using rpicam-still for all frame capture. Press 'q' to quit.")
-    while True:
-        frame = capture_with_rpicam_still()
-        if frame is None:
-            print("Failed to capture frame with rpicam-still.")
-            break
-        # Resize for speed
-        frame = cv2.resize(frame, (width, height))
-        # Convert to HSV
-        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-        # Define yellow color range
-        lower_yellow = np.array([20, 100, 100])
-        upper_yellow = np.array([35, 255, 255])
-        mask = cv2.inRange(hsv, lower_yellow, upper_yellow)
-        # Morphological operations to reduce noise
-        mask = cv2.erode(mask, None, iterations=1)
-        mask = cv2.dilate(mask, None, iterations=2)
-        # Find contours
-        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        for cnt in contours:
-            area = cv2.contourArea(cnt)
-            if area > 500:  # Filter small areas
-                x, y, w, h = cv2.boundingRect(cnt)
-                cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 255), 2)
-        # Show result
-        cv2.imshow('Yellow Detection', frame)
-        # Optional: show mask window for debugging
-        # cv2.imshow('Mask', mask)
-        if cv2.waitKey(1) & 0xFF == ord('q'):
-            break
-        time.sleep(0.03)  # ~30 fps target
-    cv2.destroyAllWindows()
+def detect_yellow_live_rpicam(width=640, height=480, save_dir='output_frames'):
+    print("Using rpicam-still for all frame capture. Saving processed frames to disk. Press Ctrl+C to stop.")
+    os.makedirs(save_dir, exist_ok=True)
+    frame_count = 0
+    try:
+        while True:
+            frame = capture_with_rpicam_still()
+            if frame is None:
+                print("Failed to capture frame with rpicam-still.")
+                break
+            # Resize for speed
+            frame = cv2.resize(frame, (width, height))
+            # Convert to HSV
+            hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+            # Define yellow color range
+            lower_yellow = np.array([20, 100, 100])
+            upper_yellow = np.array([35, 255, 255])
+            mask = cv2.inRange(hsv, lower_yellow, upper_yellow)
+            # Morphological operations to reduce noise
+            mask = cv2.erode(mask, None, iterations=1)
+            mask = cv2.dilate(mask, None, iterations=2)
+            # Find contours
+            contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            for cnt in contours:
+                area = cv2.contourArea(cnt)
+                if area > 500:  # Filter small areas
+                    x, y, w, h = cv2.boundingRect(cnt)
+                    cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 255), 2)
+            # Save result
+            out_path = os.path.join(save_dir, f'frame_{frame_count:05d}.jpg')
+            cv2.imwrite(out_path, frame)
+            print(f"Saved {out_path}")
+            frame_count += 1
+            time.sleep(0.2)  # ~5 fps, adjust as needed
+    except KeyboardInterrupt:
+        print("Stopped by user.")
 
 if __name__ == "__main__":
     detect_yellow_live_rpicam()
