@@ -78,14 +78,21 @@ def process_detections(detections, telemetry):
 
     for detection in detections:
         try:
+            # Debugging: Log telemetry data
+            print(f"[DEBUG] Telemetry data: {telemetry}")
+
+            # Ensure telemetry contains required fields
+            altitude_agl = telemetry.get('altitude', 0.0)  # Default to 0.0 if missing
+            heading_deg = telemetry.get('heading', 0.0)   # Default to 0.0 if missing
+
             # Geotag detection
             gps_coords = geo_calculator.calculate_coordinates(
                 pixel_x=detection.centroid[0],
                 pixel_y=detection.centroid[1],
                 drone_lat=telemetry['latitude'],
                 drone_lon=telemetry['longitude'],
-                altitude_agl=telemetry['altitude'],
-                heading_deg=telemetry.get('heading', 0.0)  # Default heading to 0.0 if not provided
+                altitude_agl=altitude_agl,
+                heading_deg=heading_deg  # Default heading to 0.0 if not provided
             )
 
             # Prepare detection data
@@ -140,6 +147,21 @@ def capture_frames_continuously():
 capture_thread = Thread(target=capture_frames_continuously, daemon=True)
 capture_thread.start()
 
+# Update main loop to process frames live
+
+def process_frames_live():
+    while True:
+        if not frame_buffer.empty():
+            frame = frame_buffer.get()
+            detections = detector.detect(frame)
+            process_detections(detections, telemetry)
+        else:
+            print("No frames available in buffer.")
+
+# Start frame processing in a separate thread
+processing_thread = Thread(target=process_frames_live, daemon=True)
+processing_thread.start()
+
 def main():
     """Main function to run the detection loop."""
     print(f"🚀 Starting Pi Controller for {PI_ID}")
@@ -158,19 +180,10 @@ def main():
             'altitude': 0.0
         }
 
+        # Main loop only for telemetry and other tasks
         while True:
-            print("🔄 Running detection loop...")
-            print(f"📡 Current telemetry: {telemetry}")
-
-            if not frame_buffer.empty():
-                frame = frame_buffer.get()
-                detections = detector.detect(frame)
-                process_detections(detections, telemetry)
-            else:
-                print("No frames available in buffer.")
-
             decode_mavlink_message()
-            time.sleep(0.1)  # Adjust loop frequency as needed
+            time.sleep(0.1)
 
     except KeyboardInterrupt:
         print("\nShutting down...")
