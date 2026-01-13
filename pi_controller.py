@@ -14,6 +14,7 @@ from threading import Lock
 from modules.yellow_crop_detector import YellowCropDetector, CropDetection
 from modules.geolocation import GeoLocationCalculator
 from modules.mavlink_detection_sender import MAVLinkDetectionSender
+from pymavlink import mavutil
 
 # Load configuration from config.json
 def load_config():
@@ -35,7 +36,14 @@ DETECTION_COOLDOWN = config.get('detection', {}).get('detection_cooldown', 3.0)
 # Initialize components
 geo_calculator = GeoLocationCalculator()
 detector = YellowCropDetector(config=config)
-mavlink_sender = MAVLinkDetectionSender()
+
+# Establish a connection to the MAVLink system
+master = mavutil.mavlink_connection('/dev/serial0', baud=57600)  # Replace with your connection string
+master.wait_heartbeat()  # Wait for the heartbeat signal to confirm connection
+print("✅ Connected to MAVLink system")
+
+# Initialize MAVLinkDetectionSender with the master connection
+mavlink_sender = MAVLinkDetectionSender(master)
 
 detection_lock = Lock()
 last_detection_time = 0
