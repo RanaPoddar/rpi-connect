@@ -88,6 +88,7 @@ def process_detections(detections, telemetry):
             heading_deg = telemetry.get('heading', 0.0)   # Default to 0.0 if missing
 
             # Geotag detection
+
             gps_coords = geo_calculator.calculate_coordinates(
                 pixel_x=detection.centroid[0],
                 pixel_y=detection.centroid[1],
@@ -96,14 +97,15 @@ def process_detections(detections, telemetry):
                 altitude_agl=altitude_agl,
                 heading_deg=heading_deg  # Default heading to 0.0 if not provided
             )
+            lat, lon, alt = gps_coords
 
             # Prepare detection data
             detection_data = {
                 'pi_id': PI_ID,
                 'detection_id': detection.detection_id,
-                'latitude': gps_coords['latitude'],
-                'longitude': gps_coords['longitude'],
-                'altitude': gps_coords['altitude'],
+                'latitude': lat,
+                'longitude': lon,
+                'altitude': alt,
                 'timestamp': datetime.now().isoformat()
             }
 
