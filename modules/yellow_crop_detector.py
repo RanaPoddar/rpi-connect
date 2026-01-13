@@ -73,14 +73,15 @@ class YellowCropDetector:
         # HSV Color thresholds for yellow detection
         # IMPORTANT: These ranges must be TIGHT to avoid false positives on other colors
         # Hue 20-30 = pure yellow, higher saturation = vivid yellow only
-        self.lower_yellow = np.array(self.config.get('yellow_hsv_lower', [20, 90, 60]))
-        self.upper_yellow = np.array(self.config.get('yellow_hsv_upper', [30, 255, 255]))
+        # Broader HSV range for yellow (to catch more real-world yellow shades)
+        self.lower_yellow = np.array(self.config.get('yellow_hsv_lower', [15, 70, 50]))
+        self.upper_yellow = np.array(self.config.get('yellow_hsv_upper', [35, 255, 255]))
         
         # Detection parameters
         self.min_area = self.config.get('min_contour_area', 300)
         self.confidence_threshold = self.config.get('confidence_threshold', 0.5)
         self.adaptive_threshold = self.config.get('adaptive_threshold', True)
-        self.debug_mode = self.config.get('debug_mode', False)
+        self.debug_mode = self.config.get('debug_mode', True)
         
         # Morphological operations kernels (larger to merge nearby regions)
         self.kernel_open = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
