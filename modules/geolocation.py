@@ -94,6 +94,48 @@ class GeoLocationCalculator:
         
         return detection_lat, detection_lon
     
+    def calculate_coordinates(
+        self,
+        pixel_x: float,
+        pixel_y: float,
+        drone_lat: float,
+        drone_lon: float,
+        altitude_agl: float,
+        heading_deg: float,
+        pitch_deg: float = 0.0,
+        roll_deg: float = 0.0
+    ) -> Tuple[float, float, float]:
+        """
+        Calculate GPS coordinates (latitude, longitude) and altitude for a detection.
+
+        Args:
+            pixel_x: Pixel X coordinate (from left)
+            pixel_y: Pixel Y coordinate (from top)
+            drone_lat: Drone latitude (degrees)
+            drone_lon: Drone longitude (degrees)
+            altitude_agl: Altitude above ground level (meters)
+            heading_deg: Drone heading (degrees, 0=North, clockwise)
+            pitch_deg: Camera pitch angle (degrees, + = up, - = down)
+            roll_deg: Camera roll angle (degrees, + = right, - = left)
+
+        Returns:
+            Tuple of (latitude, longitude, altitude) for the detection.
+        """
+        # Calculate ground footprint dimensions
+        ground_width, ground_height = self._calculate_ground_footprint(altitude_agl, pitch_deg)
+
+        # Convert pixel to meters offset from image center
+        offset_x, offset_y = self._pixel_to_meters_offset(pixel_x, pixel_y, ground_width, ground_height)
+
+        # Apply rotation for heading, pitch, and roll
+        rotated_x, rotated_y = self._apply_rotation(offset_x, offset_y, heading_deg, pitch_deg, roll_deg)
+
+        # Convert meters offset to GPS coordinates
+        detection_lat, detection_lon = self._meters_to_gps(drone_lat, drone_lon, rotated_x, rotated_y)
+
+        # Return calculated coordinates and altitude
+        return detection_lat, detection_lon, altitude_agl
+    
     def _calculate_ground_footprint(
         self,
         altitude_agl: float,

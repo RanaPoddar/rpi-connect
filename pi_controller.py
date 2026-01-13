@@ -12,6 +12,7 @@ from threading import Lock
 import subprocess
 import cv2
 import numpy as np
+from concurrent.futures import ThreadPoolExecutor
 
 # Import necessary modules for CV detection and geolocation
 from modules.yellow_crop_detector import YellowCropDetector, CropDetection
@@ -142,8 +143,26 @@ def main():
                 detections = []  # Initialize detections as an empty list
 
                 if ret:
+                    # Optimize frame capture by reducing resolution
+                    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+                    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+
                     print("Frame captured successfully. Processing frame for yellow detection...")
-                    detections = detector.detect(frame)
+
+                    # Use a smaller region of interest (ROI) for detection
+                    roi = frame[100:380, 100:540]  # Example ROI, adjust as needed
+
+                    # Add detailed debugging logs
+                    print(f"[DEBUG] Frame resolution: {frame.shape}")
+                    print(f"[DEBUG] ROI dimensions: {roi.shape}")
+                    print(f"[DEBUG] Detection cooldown: {DETECTION_COOLDOWN}s")
+                    print(f"[DEBUG] Telemetry data: {telemetry}")
+
+                    # Parallelize detection processing
+                    with ThreadPoolExecutor(max_workers=2) as executor:
+                        future_detections = executor.submit(detector.detect, roi)
+                        detections = future_detections.result()
+
                     print(f"📸 Detections: {detections}")
 
                     # Debugging: Save frame and detected regions if debug_mode is enabled
