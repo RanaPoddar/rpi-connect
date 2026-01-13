@@ -85,9 +85,9 @@ class YellowCropDetector:
         self.debug_mode = self.config.get('debug_mode', True)
         
         # Morphological operations kernels (larger to merge nearby regions)
-        self.kernel_open = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-        self.kernel_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15))
-        self.kernel_dilate = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
+        self.kernel_open = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
+        self.kernel_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (25, 25))
+        self.kernel_dilate = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15))
         
         # Detection statistics
         self.total_detections = 0
@@ -159,12 +159,10 @@ class YellowCropDetector:
         # Apply aggressive morphological operations to merge nearby regions
         # Opening: removes small noise/artifacts
         mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, self.kernel_open, iterations=1)
-        
         # Dilation: expand detected regions (merges nearby fragments)
-        mask = cv2.dilate(mask, self.kernel_dilate, iterations=2)
-        
+        mask = cv2.dilate(mask, self.kernel_dilate, iterations=3)
         # Closing: fills holes and merges nearby regions (multiple iterations)
-        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, self.kernel_close, iterations=2)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, self.kernel_close, iterations=3)
         
         if self.debug_mode:
             total_pixels = mask.size
