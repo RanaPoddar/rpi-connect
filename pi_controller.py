@@ -1,3 +1,4 @@
+import requests
 #!/usr/bin/env python3
 """
 Raspberry Pi Controller - Minimal Version
@@ -65,6 +66,18 @@ def signal_handler(sig, frame):
 signal.signal(signal.SIGINT, signal_handler)
 
 def process_detections(detections, telemetry):
+    def send_detection_to_gcs(detection_data):
+        try:
+            url = "http://127.0.0.1:5000/api/mavlink-detection"  # Update IP/port if GCS is remote
+            # Add drone_id for compatibility with GCS backend
+            detection_data['drone_id'] = detection_data.get('pi_id', 'unknown')
+            response = requests.post(url, json=detection_data, timeout=2)
+            if response.ok:
+                print("Detection sent to GCS HTTP API")
+            else:
+                print(f"Failed to send detection to GCS: {response.status_code} {response.text}")
+        except Exception as e:
+            print(f"Error sending detection to GCS: {e}")
     """Process detections, geotag them, and send coordinates over telemetry."""
     global last_detection_time
 
@@ -109,9 +122,13 @@ def process_detections(detections, telemetry):
                 'timestamp': datetime.now().isoformat()
             }
 
+
             # Send detection over telemetry
             mavlink_sender.send_detection(detection_data)
             print(f"Detection sent: {detection_data}")
+
+            # Also send detection to GCS HTTP API
+            send_detection_to_gcs(detection_data)
 
         except Exception as e:
             print(f"Error processing detection: {e}")
