@@ -213,6 +213,11 @@ class PiController:
             self.pixhawk = PixhawkTelemetry(PIXHAWK_CONFIG)
             if self.pixhawk.connect():
                 print("✅ Pixhawk telemetry initialized")
+                
+                # Register command callback for detection control via MAVLink
+                self.pixhawk.set_command_callback(self._handle_mavlink_command)
+                print("📡 MAVLink command handler registered (42000/42001)")
+                
                 # Start telemetry updates with callback
                 self.pixhawk.start_telemetry_updates(callback=self._on_telemetry_update)
                 

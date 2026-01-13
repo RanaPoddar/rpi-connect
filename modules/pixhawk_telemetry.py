@@ -167,6 +167,52 @@ class PixhawkTelemetry:
         def mode_callback(vehicle, attr_name, value):
             with self.lock:
                 self.telemetry_data['flight_mode'] = str(value.name)
+        
+        # Add MAVLink message listener for COMMAND_LONG (detection control)
+        @self.vehicle.on_message('COMMAND_LONG')
+        def command_callback(vehicle, name, message):
+            command_id = message.command
+            
+            # Handle custom detection commands
+            if command_id == 42000:  # Start detection
+                print("📡 MAVLink Command: START DETECTION (42000)")
+                if hasattr(self, 'command_callback') and self.command_callback:
+                    self.command_callback('start_detection', {})
+                # Send ACK
+                self._send_command_ack(command_id, mavutil.mavlink.MAV_RESULT_ACCEPTED)
+                
+            elif command_id == 42001:  # Stop detection
+                print("📡 MAVLink Command: STOP DETECTION (42001)")
+                if hasattr(self, 'command_callback') and self.command_callback:
+                    self.command_callback('stop_detection', {})
+                # Send ACK
+                self._send_command_ack(command_id, mavutil.mavlink.MAV_RESULT_ACCEPTED)
+    
+    def set_command_callback(self, callback: Callable):
+        """
+        Set callback for MAVLink commands
+        
+        Args:
+            callback: Function to call when command received (command_type, params)
+        """
+        self.command_callback = callback
+        print("📡 Command callback registered for detection control")
+    
+    def _send_command_ack(self, command_id: int, result: int):
+        """Send command acknowledgment"""
+        try:
+            msg = self.vehicle.message_factory.command_ack_encode(
+                command_id,  # command
+                result,      # result (0=accepted, 4=unsupported)
+                0,           # progress
+                0,           # result_param2
+                self.vehicle._master.target_system,      # target_system
+                self.vehicle._master.target_component    # target_component
+            )
+            self.vehicle.send_mavlink(msg)
+            print(f"   ✅ Sent COMMAND_ACK for {command_id}")
+        except Exception as e:
+            print(f"   ⚠️ Failed to send ACK: {e}")
     
     def disconnect(self):
         """Disconnect from Pixhawk"""

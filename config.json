@@ -41,8 +41,8 @@
     "note": "TELEM2 at 921600 baud (high-speed). read_only=true prevents flight commands, allows telemetry reading and STATUSTEXT detection sending only."
   },
   "mavlink_command_receiver": {
-    "enabled": true,
-    "note": "Enabled for telemetry-only mode - Long range detection control via F10 RC (commands 42000/42001)"
+    "enabled": false,
+    "note": "DISABLED - Conflicts with dronekit message handling. Commands handled in pixhawk_telemetry instead."
   },
   "mavlink_detection": {
     "enabled": true,
