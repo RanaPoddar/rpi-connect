@@ -168,6 +168,7 @@ def main():
         'altitude': 0.0
     }
 
+
     frame_count = 0
     save_dir = 'output_frames_detected'
     os.makedirs(save_dir, exist_ok=True)
@@ -176,12 +177,14 @@ def main():
         while True:
             # 1. Capture frame
             frame = capture_frame_and_resize(width=640, height=480)
+            print(f"[DEBUG] Frame {frame_count}: Capture {'OK' if frame is not None else 'FAILED'}")
             if frame is None:
                 print("Failed to capture frame with rpicam-still.")
                 continue
 
             # 2. Run yellow detection
             detections = detector.detect(frame)
+            print(f"[DEBUG] Frame {frame_count}: {len(detections)} detections found")
 
             # 3. Process detections (geotag, send, log)
             process_detections(detections, telemetry)
