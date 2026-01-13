@@ -2130,25 +2130,19 @@ def main():
             if not SOCKETIO_ENABLED or sio is None:
                 if controller.mavlink_detection_sender:
                     success = controller.mavlink_detection_sender.send_system_stats(stats)
-                    if success:
-                        print(f"📡 System stats sent via MAVLink telemetry")
-                        print(f"   CPU:{stats.get('cpu_usage', 0):.1f}% MEM:{stats.get('memory_usage', 0):.1f}% TEMP:{stats.get('cpu_temp', 0):.1f}°C")
-                    else:
-                        print(f"⚠️  Failed to send system stats")
+                    # Only log every 6th time (once per minute instead of every 10 seconds)
+                    if success and stats_counter % 6 == 0:
+                        print(f"📡 System stats: CPU:{stats.get('cpu_usage', 0):.1f}% MEM:{stats.get('memory_usage', 0):.1f}% TEMP:{stats.get('cpu_temp', 0):.1f}°C")
             # In hybrid mode, try Socket.IO first, fallback to MAVLink
             elif sio.connected:
                 success = safe_emit('system_stats', {'pi_id': PI_ID, 'stats': stats})
-                if success:
-                    print(f"📊 System stats sent via Socket.IO (WiFi)")
-                    print(f"   CPU:{stats.get('cpu_usage', 0):.1f}% MEM:{stats.get('memory_usage', 0):.1f}% TEMP:{stats.get('cpu_temp', 0):.1f}°C")
+                if success and stats_counter % 6 == 0:
+                    print(f"📊 System stats: CPU:{stats.get('cpu_usage', 0):.1f}% MEM:{stats.get('memory_usage', 0):.1f}% TEMP:{stats.get('cpu_temp', 0):.1f}°C")
             # WiFi disconnected - use MAVLink fallback
             elif controller.mavlink_detection_sender:
                 success = controller.mavlink_detection_sender.send_system_stats(stats)
-                if success:
-                    print(f"📡 System stats sent via MAVLink (WiFi down, using radio)")
-                    print(f"   CPU:{stats.get('cpu_usage', 0):.1f}% MEM:{stats.get('memory_usage', 0):.1f}% TEMP:{stats.get('cpu_temp', 0):.1f}°C")
-                else:
-                    print(f"⚠️  Failed to send system stats (no connectivity)")
+                if success and stats_counter % 6 == 0:
+                    print(f"📡 System stats: CPU:{stats.get('cpu_usage', 0):.1f}% MEM:{stats.get('memory_usage', 0):.1f}% TEMP:{stats.get('cpu_temp', 0):.1f}°C")
     
     except KeyboardInterrupt:
         print("\nShutting down...")
