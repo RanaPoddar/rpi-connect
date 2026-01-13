@@ -100,25 +100,33 @@ CAMERA_ENABLED = config.get('camera', {}).get('enabled', True)
 PIXHAWK_ENABLED = config.get('pixhawk', {}).get('enabled', True)
 PIXHAWK_CONFIG = config.get('pixhawk', {})
 SOCKETIO_CONFIG = config.get('socketio', {})
+SOCKETIO_ENABLED = config.get('socketio', {}).get('enabled', True)  # Telemetry-only mode when False
 
-# Initialize Socket.IO client with robust timeout settings
-# These settings prevent disconnection issues over slow/unstable networks
-sio = socketio.Client(
-    reconnection=True,
-    reconnection_attempts=0,  # Infinite reconnection attempts
-    reconnection_delay=SOCKETIO_CONFIG.get('reconnection_delay', 2),
-    reconnection_delay_max=SOCKETIO_CONFIG.get('reconnection_delay_max', 30),
-    randomization_factor=0.5,  # Add jitter to prevent thundering herd
-    
-    # Engine.IO settings for WebSocket stability
-    engineio_logger=False,
-    logger=False,
-    
-    # Critical timeout settings to prevent disconnections
-    request_timeout=SOCKETIO_CONFIG.get('request_timeout', 60),
-    http_session=None,
-    ssl_verify=True
-)
+print(f"⚙️  Configuration loaded:")
+print(f"   Pi ID: {PI_ID}")
+print(f"   Socket.IO: {'Enabled' if SOCKETIO_ENABLED else 'DISABLED (Telemetry-only mode)'}")
+print(f"   Pixhawk: {'Enabled' if PIXHAWK_ENABLED else 'Disabled'}")
+print(f"   Camera: {'Enabled' if CAMERA_ENABLED else 'Disabled'}")
+print()
+
+# Initialize Socket.IO client only if enabled
+if SOCKETIO_ENABLED:
+    sio = socketio.Client(
+        reconnection=True,
+        reconnection_attempts=0,
+        reconnection_delay=SOCKETIO_CONFIG.get('reconnection_delay', 2),
+        reconnection_delay_max=SOCKETIO_CONFIG.get('reconnection_delay_max', 30),
+        randomization_factor=0.5,
+        engineio_logger=False,
+        logger=False,
+        request_timeout=SOCKETIO_CONFIG.get('request_timeout', 60),
+        http_session=None,
+        ssl_verify=True
+    )
+    print("🌐 Socket.IO client initialized")
+else:
+    sio = None
+    print("📡 Telemetry-only mode: Socket.IO disabled")
 
 # Camera state
 camera_lock = Lock()
@@ -130,7 +138,11 @@ def safe_emit(event_name, data, timeout=5.0):
     """
     Safely emit a Socket.IO event with timeout and error handling.
     Returns True if successful, False otherwise.
+    Skips if Socket.IO is disabled (telemetry-only mode).
     """
+    if not SOCKETIO_ENABLED or sio is None:
+        return False  # Telemetry-only mode
+    
     if not sio.connected:
         return False
     
@@ -528,25 +540,42 @@ class PiController:
                     'ground_speed': telemetry.get('groundspeed')
                 })
                 
-                # Send to server via Socket.IO (WiFi/LTE) - metadata only
-                socketio_sent = False
-                if sio.connected:
-                    try:
-                        sio.emit('crop_detection', detection_data)
-                        socketio_sent = True
-                        print(f"   📤 Socket.IO: Detection {self.detection_count:04d} sent: {unique_id}")
-                    except Exception as e:
-                        print(f"   ⚠️  Socket.IO send failed: {e}")
+                # TELEMETRY-ONLY MODE: Send only via MAVLink radio
+                if not SOCKETIO_ENABLED or sio is None:
+                    if self.mavlink_detection_sender and self.mavlink_detection_sender.enabled:
+                        try:
+                            mavlink_sent = self.mavlink_detection_sender.send_detection(detection_data)
+                            if mavlink_sent:
+                                print(f"   MAVLink: Detection {self.detection_count:04d} sent via telemetry radio: {unique_id}")
+                            else:
+                                print(f"    Failed to send detection via telemetry")
+                        except Exception as e:
+                            print(f"    MAVLink send error: {e}")
+                    else:
+                        print(f"     MAVLink sender not available")
                 
-                # Send via MAVLink (Long-range radio fallback/backup)
-                mavlink_sent = False
-                if self.mavlink_detection_sender and self.mavlink_detection_sender.enabled:
-                    try:
-                        mavlink_sent = self.mavlink_detection_sender.send_detection(detection_data)
-                        if mavlink_sent:
-                            print(f"   📡 MAVLink: Detection {self.detection_count:04d} sent: {unique_id}")
-                    except Exception as e:
-                        print(f"   ⚠️  MAVLink send failed: {e}")
+                # HYBRID MODE: Try Socket.IO first, fallback to MAVLink
+                else:
+                    # Try Socket.IO (WiFi/LTE) first
+                    socketio_sent = False
+                    if sio.connected:
+                        try:
+                            sio.emit('crop_detection', detection_data)
+                            socketio_sent = True
+                            print(f"    Socket.IO: Detection {self.detection_count:04d} sent: {unique_id}")
+                        except Exception as e:
+                            print(f"    Socket.IO send failed: {e}")
+                    
+                    # Always send via MAVLink too for redundancy/backup
+                    mavlink_sent = False
+                    if self.mavlink_detection_sender and self.mavlink_detection_sender.enabled:
+                        try:
+                            mavlink_sent = self.mavlink_detection_sender.send_detection(detection_data)
+                            if mavlink_sent:
+                                status = "backup" if socketio_sent else "primary (WiFi down)"
+                                print(f"   📡 MAVLink: Detection {self.detection_count:04d} sent ({status}): {unique_id}")
+                        except Exception as e:
+                            print(f"   ⚠️  MAVLink send failed: {e}")
                 
                 # Log transmission status
                 if socketio_sent and mavlink_sent:
@@ -1493,6 +1522,20 @@ class PiController:
 controller = PiController()
 
 # Socket.IO event handlers
+# Note: These will not be registered if Socket.IO is disabled (telemetry-only mode)
+# The sio object will be None and these decorators will be skipped
+if SOCKETIO_ENABLED and sio is not None:
+    print("🌐 Registering Socket.IO event handlers...")
+else:
+    print("📡 Socket.IO disabled - Running in telemetry-only mode")
+    print("   All data will be transmitted via MAVLink telemetry radio")
+    # Create dummy sio object to prevent decorator errors
+    class DummySocketIO:
+        def event(self, func): return func
+        def on(self, event): return lambda func: func
+        connected = False
+    sio = DummySocketIO()
+
 @sio.event
 def connect():
     print(f"✅ Connected to server at {SERVER_URL}")
@@ -2049,23 +2092,27 @@ def handle_safety_get_status(data):
 
 def main():
     """Main function"""
-    print(f"Starting Pi Controller for {PI_ID}")
-    print(f"Connecting to {SERVER_URL}")
+    print(f"🚀 Starting Pi Controller for {PI_ID}")
+    
+    if SOCKETIO_ENABLED:
+        print(f"🌐 Socket.IO Mode: Connecting to {SERVER_URL}")
+    else:
+        print(f"📡 Telemetry-Only Mode: No WiFi/Socket.IO (using MAVLink telemetry radio only)")
     
     try:
-        # Connect to server with enhanced WebSocket settings
-        # These options are passed to the underlying engine.io client
-        sio.connect(
-            SERVER_URL,
-            # WebSocket-specific options to prevent timeouts
-            transports=['websocket', 'polling'],  # Prefer WebSocket, fallback to polling
-            wait_timeout=10,  # Connection establishment timeout
-            # Engine.IO options for the WebSocket transport
-            socketio_path='/socket.io',
-            # Additional headers if needed
-            headers={}
-        )
-        print(f"✅ Connected successfully with ping_interval=25s, ping_timeout=60s")
+        # Connect to server only if Socket.IO is enabled
+        if SOCKETIO_ENABLED and sio is not None:
+            print(f"🔄 Attempting Socket.IO connection...")
+            sio.connect(
+                SERVER_URL,
+                transports=['websocket', 'polling'],
+                wait_timeout=10,
+                socketio_path='/socket.io',
+                headers={}
+            )
+            print(f"✅ Socket.IO connected successfully (ping_interval=25s, ping_timeout=60s)")
+        else:
+            print(f"✅ Running in telemetry-only mode (no WiFi dependency)")
         
         # Send stats periodically
         stats_counter = 0
@@ -2074,27 +2121,29 @@ def main():
             stats_counter += 1
             stats = controller.get_system_stats()
             
-            # Try Socket.IO first (WiFi) using safe_emit
-            if sio.connected:
+            # In telemetry-only mode, always use MAVLink
+            if not SOCKETIO_ENABLED or sio is None:
+                if controller.mavlink_detection_sender:
+                    success = controller.mavlink_detection_sender.send_system_stats(stats)
+                    if success:
+                        print(f"📡 System stats sent via MAVLink telemetry")
+                        print(f"   CPU:{stats.get('cpu_usage', 0):.1f}% MEM:{stats.get('memory_usage', 0):.1f}% TEMP:{stats.get('cpu_temp', 0):.1f}°C")
+                    else:
+                        print(f"⚠️  Failed to send system stats")
+            # In hybrid mode, try Socket.IO first, fallback to MAVLink
+            elif sio.connected:
                 success = safe_emit('system_stats', {'pi_id': PI_ID, 'stats': stats})
                 if success:
                     print(f"📊 System stats sent via Socket.IO (WiFi)")
-                    # Print key stats for monitoring
                     print(f"   CPU:{stats.get('cpu_usage', 0):.1f}% MEM:{stats.get('memory_usage', 0):.1f}% TEMP:{stats.get('cpu_temp', 0):.1f}°C")
-            # Fallback to MAVLink if out of WiFi range
+            # WiFi disconnected - use MAVLink fallback
             elif controller.mavlink_detection_sender:
                 success = controller.mavlink_detection_sender.send_system_stats(stats)
                 if success:
-                    print(f"📡 System stats sent via MAVLink (out of WiFi range)")
+                    print(f"📡 System stats sent via MAVLink (WiFi down, using radio)")
                     print(f"   CPU:{stats.get('cpu_usage', 0):.1f}% MEM:{stats.get('memory_usage', 0):.1f}% TEMP:{stats.get('cpu_temp', 0):.1f}°C")
                 else:
                     print(f"⚠️  Failed to send system stats (no connectivity)")
-            
-            # Send system stats via MAVLink every 60 seconds (every 6th cycle) even when WiFi is available
-            # This ensures GCS has dual-channel visibility for reliability monitoring
-            if stats_counter % 6 == 0 and controller.mavlink_detection_sender:
-                controller.mavlink_detection_sender.send_system_stats(stats)
-                print(f"📡 MAVLink: Sent system stats (CPU:{stats.get('cpu_usage', 0):.1f}% MEM:{stats.get('memory_usage', 0):.1f}% TEMP:{stats.get('cpu_temp', 0):.1f}°C)")
     
     except KeyboardInterrupt:
         print("\nShutting down...")

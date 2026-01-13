@@ -1,6 +1,7 @@
 {
-  "server_url": "http://10.215.165.94:3000",
+  "server_url": "",
   "pi_id": "detection_drone_pi_pushpak",
+  "socketio_enabled": false,
   "camera": {
     "enabled": true,
     "resolution": [4056, 3040],
@@ -25,8 +26,8 @@
     "enabled": true,
     "interval_seconds": 2.0,
     "quality": 85,
-    "send_to_server": true,
-    "note": "Captures full-resolution images at regular intervals during mission"
+    "send_to_server": false,
+    "note": "Captures full-resolution images at regular intervals during mission. Saved locally only (no WiFi)."
   },
   "pixhawk": {
     "enabled": true,
@@ -34,10 +35,10 @@
     "baud_rate": 921600,
     "simulation_mode": false,
     "update_rate": 10.0,
-    "read_only": false,
+    "read_only": true,
     "system_id": 255,
     "component_id": 191,
-    "note": "TELEM2 at 921600 baud (high-speed). read_only=false allows detection transmission to GCS."
+    "note": "TELEM2 at 921600 baud (high-speed). read_only=true prevents flight commands, allows telemetry reading and STATUSTEXT detection sending only."
   },
   "mavlink_command_receiver": {
     "enabled": false,
@@ -45,22 +46,22 @@
   },
   "mavlink_detection": {
     "enabled": true,
-    "description": "Hybrid detection transmission - Socket.IO primary + MAVLink fallback",
+    "description": "PRIMARY detection transmission - Telemetry radio only, no WiFi",
     "send_metadata": true,
     "send_summary_interval": 30.0,
-    "note": "Enables detection transmission over long-range MAVLink radio via Pixhawk to GCS. Messages forwarded from TELEM2 to TELEM1 automatically."
+    "note": "All detection transmission via long-range MAVLink radio. Pi has no WiFi dependency. Messages sent via Pixhawk TELEM2, forwarded to TELEM1, transmitted to GCS."
   },
   "safety": {
-    "geofence_enabled": true,
+    "geofence_enabled": false,
     "geofence_radius": 500,
     "geofence_max_altitude": 20,
     "geofence_min_altitude": -0.5,
-    "battery_rtl_threshold": 25,
-    "battery_land_threshold": 15,
+    "battery_rtl_threshold": 0,
+    "battery_land_threshold": 0,
     "battery_critical_voltage": 13.5,
     "connection_timeout": 10,
     "telemetry_timeout": 5,
-    "note": "min_altitude reduced to 0.5m to allow landing. Geofence checks are automatically disabled during RTL/LAND modes."
+    "note": "DISABLED - Safety monitoring and emergency actions handled by GCS and Pixhawk only. Pi is detection-only, no flight commands."
   },
   "webrtc": {
     "enabled": true,
@@ -71,12 +72,13 @@
     ]
   },
   "socketio": {
+    "enabled": false,
     "request_timeout": 60,
     "ping_timeout": 60,
     "ping_interval": 25,
     "reconnection_delay": 2,
     "reconnection_delay_max": 30,
-    "note": "Socket.IO connection settings. ping_timeout=60s prevents disconnections on slow networks. ping_interval=25s keeps connection alive."
+    "note": "DISABLED - Telemetry radio only mode. Pi operates without WiFi. All data transmitted via MAVLink telemetry."
   },
   "monitoring": {
     "stats_interval": 10,
