@@ -127,8 +127,18 @@ def main():
             # Run detection
             with detection_lock:
                 frame = None  # Replace with actual frame capture logic
-                detections = detector.detect(frame)
-                print(f"📸 Detections: {detections}")
+                if frame is not None:
+                    print("Processing frame for yellow detection...")
+                    detections = detector.detect(frame)
+                    print(f"📸 Detections: {detections}")
+
+                    # Debugging: Save frame and detected regions if debug_mode is enabled
+                    if config['detection']['debug_mode']:
+                        print("Debug mode enabled. Saving detection images...")
+                        detector.save_debug_images(frame, detections)
+                else:
+                    print("No frame captured.")
+
                 process_detections(detections, telemetry)
 
             decode_mavlink_message()
