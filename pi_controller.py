@@ -127,6 +127,8 @@ def main():
             # Run detection
             with detection_lock:
                 frame = None  # Replace with actual frame capture logic
+                detections = []  # Initialize detections as an empty list
+
                 if frame is not None:
                     print("Processing frame for yellow detection...")
                     detections = detector.detect(frame)
