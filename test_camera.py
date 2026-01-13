@@ -5,14 +5,12 @@ import subprocess
 import os
 import time
 
-def capture_with_rpicam_still(temp_file='frame.jpg', width=640, height=480):
+def capture_with_rpicam_still(temp_file='frame.jpg'):
     cmd = [
         'rpicam-still',
         '-o', temp_file,
         '-t', '1',  # 1 ms timeout for fastest capture
         '-n',       # No preview
-        '-w', str(width),
-        '-h', str(height),
         '--immediate',
         '--nopreview'
     ]
@@ -29,10 +27,12 @@ def capture_with_rpicam_still(temp_file='frame.jpg', width=640, height=480):
 def detect_yellow_live_rpicam(width=640, height=480):
     print("Using rpicam-still for all frame capture. Press 'q' to quit.")
     while True:
-        frame = capture_with_rpicam_still(width=width, height=height)
+        frame = capture_with_rpicam_still()
         if frame is None:
             print("Failed to capture frame with rpicam-still.")
             break
+        # Resize for speed
+        frame = cv2.resize(frame, (width, height))
         # Convert to HSV
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
         # Define yellow color range
