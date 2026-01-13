@@ -178,12 +178,30 @@ def main():
 
     print("🌾 Detection enabled. Starting detection immediately...")
 
-    # Simulate telemetry data (replace with actual telemetry source)
-    telemetry = {
-        'latitude': 0.0,
-        'longitude': 0.0,
-        'altitude': 0.0
-    }
+
+    def get_live_telemetry(master):
+        """Fetch latest GPS, altitude, and heading from MAVLink."""
+        lat, lon, alt, heading = 0.0, 0.0, 0.0, 0.0
+        # Try to get GLOBAL_POSITION_INT (most reliable for GPS/alt)
+        msg = master.recv_match(type='GLOBAL_POSITION_INT', blocking=False)
+        if msg:
+            lat = msg.lat / 1e7
+            lon = msg.lon / 1e7
+            alt = msg.relative_alt / 1000.0  # in meters
+            heading = (msg.hdg / 100.0) if hasattr(msg, 'hdg') and msg.hdg is not None else 0.0
+        else:
+            # Fallback to VFR_HUD for heading/altitude
+            vfr = master.recv_match(type='VFR_HUD', blocking=False)
+            if vfr:
+                alt = vfr.alt
+                heading = vfr.heading
+        return {
+            'latitude': lat,
+            'longitude': lon,
+            'altitude': alt,
+            'heading': heading
+        }
+
 
 
     frame_count = 0
@@ -203,10 +221,14 @@ def main():
             detections = detector.detect(frame)
             print(f"[DEBUG] Frame {frame_count}: {len(detections)} detections found")
 
-            # 3. Process detections (geotag, send, log)
+            # 3. Fetch live telemetry from MAVLink
+            telemetry = get_live_telemetry(master)
+            print(f"[DEBUG] Live Telemetry: {telemetry}")
+
+            # 4. Process detections (geotag, send, log)
             process_detections(detections, telemetry)
 
-            # 4. Optionally, save annotated frame for review
+            # 5. Optionally, save annotated frame for review
             if detections:
                 annotated = detector.visualize_detections(frame, detections, show_info=True)
                 out_path = os.path.join(save_dir, f'frame_{frame_count:05d}.jpg')
@@ -214,7 +236,7 @@ def main():
                 print(f"Saved detection frame: {out_path}")
             frame_count += 1
 
-            # 5. Adjust sleep for drone speed (2m/s):
+            # 6. Adjust sleep for drone speed (2m/s):
             # At 2m/s, 5 fps gives a detection every 0.4m. Adjust as needed.
             time.sleep(0.2)
 
