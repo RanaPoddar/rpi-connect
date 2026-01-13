@@ -13,6 +13,8 @@ import subprocess
 import cv2
 import numpy as np
 from concurrent.futures import ThreadPoolExecutor
+from queue import Queue
+from threading import Thread
 
 # Import necessary modules for CV detection and geolocation
 from modules.yellow_crop_detector import YellowCropDetector, CropDetection
@@ -57,6 +59,9 @@ mavlink_sender = MAVLinkDetectionSender(master)
 detection_lock = Lock()
 last_detection_time = 0
 
+# Frame buffer for continuous capture
+frame_buffer = Queue(maxsize=5)
+
 def process_detections(detections, telemetry):
     """Process detections, geotag them, and send coordinates over telemetry."""
     global last_detection_time
@@ -75,7 +80,12 @@ def process_detections(detections, telemetry):
         try:
             # Geotag detection
             gps_coords = geo_calculator.calculate_coordinates(
-                telemetry['latitude'], telemetry['longitude'], telemetry['altitude'], detection
+                pixel_x=detection.centroid[0],
+                pixel_y=detection.centroid[1],
+                drone_lat=telemetry['latitude'],
+                drone_lon=telemetry['longitude'],
+                altitude_agl=telemetry['altitude'],
+                heading_deg=telemetry.get('heading', 0.0)  # Default heading to 0.0 if not provided
             )
 
             # Prepare detection data
@@ -112,6 +122,24 @@ def capture_frame():
     frame = cv2.imread("frame.jpg")
     return frame
 
+def capture_frames_continuously():
+    cap = cv2.VideoCapture(0)
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+
+    while True:
+        ret, frame = cap.read()
+        if ret and not frame_buffer.full():
+            frame_buffer.put(frame)
+        elif not ret:
+            print("Error: Unable to capture frame.")
+
+    cap.release()
+
+# Start frame capture in a separate thread
+capture_thread = Thread(target=capture_frames_continuously, daemon=True)
+capture_thread.start()
+
 def main():
     """Main function to run the detection loop."""
     print(f"🚀 Starting Pi Controller for {PI_ID}")
@@ -134,61 +162,15 @@ def main():
             print("🔄 Running detection loop...")
             print(f"📡 Current telemetry: {telemetry}")
 
-            # Update frame capture logic
-            with detection_lock:
-                cap = cv2.VideoCapture(0)  # Use the correct camera index
-                ret, frame = cap.read()
-                cap.release()
-
-                detections = []  # Initialize detections as an empty list
-
-                if ret:
-                    # Optimize frame capture by reducing resolution
-                    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-                    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-
-                    print("Frame captured successfully. Processing frame for yellow detection...")
-
-                    # Use a smaller region of interest (ROI) for detection
-                    roi = frame[100:380, 100:540]  # Example ROI, adjust as needed
-
-                    # Add detailed debugging logs
-                    print(f"[DEBUG] Frame resolution: {frame.shape}")
-                    print(f"[DEBUG] ROI dimensions: {roi.shape}")
-                    print(f"[DEBUG] Detection cooldown: {DETECTION_COOLDOWN}s")
-                    print(f"[DEBUG] Telemetry data: {telemetry}")
-
-                    # Parallelize detection processing
-                    with ThreadPoolExecutor(max_workers=2) as executor:
-                        future_detections = executor.submit(detector.detect, roi)
-                        detections = future_detections.result()
-
-                    print(f"📸 Detections: {detections}")
-
-                    # Debugging: Save frame and detected regions if debug_mode is enabled
-                    if config['detection']['debug_mode']:
-                        print("Debug mode enabled. Saving detection images...")
-                        detector.save_debug_images(frame, detections)
-                else:
-                    print("Error: Unable to capture frame. Falling back to rpicam...")
-                    frame = capture_frame()
-                    if frame is not None:
-                        print("Frame captured using rpicam. Processing frame for yellow detection...")
-                        detections = detector.detect(frame)
-                        print(f"📸 Detections: {detections}")
-
-                        # Debugging: Save frame and detected regions if debug_mode is enabled
-                        if config['detection']['debug_mode']:
-                            print("Debug mode enabled. Saving detection images...")
-                            detector.save_debug_images(frame, detections)
-                    else:
-                        print("Error: Unable to capture frame using rpicam.")
-
+            if not frame_buffer.empty():
+                frame = frame_buffer.get()
+                detections = detector.detect(frame)
                 process_detections(detections, telemetry)
+            else:
+                print("No frames available in buffer.")
 
             decode_mavlink_message()
-
-            time.sleep(1)  # Adjust loop frequency as needed
+            time.sleep(0.1)  # Adjust loop frequency as needed
 
     except KeyboardInterrupt:
         print("\nShutting down...")
