@@ -88,13 +88,13 @@ def process_detections(detections, telemetry):
 
 def main():
     """Main function to run the detection loop."""
-    print(f" Starting Pi Controller for {PI_ID}")
+    print(f"🚀 Starting Pi Controller for {PI_ID}")
 
     if not DETECTION_ENABLED:
         print("Detection is disabled in the configuration.")
         return
 
-    print(" Detection enabled. Starting detection immediately...")
+    print("🌾 Detection enabled. Starting detection immediately...")
 
     try:
         # Simulate telemetry data (replace with actual telemetry source)
@@ -105,10 +105,14 @@ def main():
         }
 
         while True:
+            print("🔄 Running detection loop...")
+            print(f"📡 Current telemetry: {telemetry}")
+
             # Run detection
             with detection_lock:
                 frame = None  # Replace with actual frame capture logic
                 detections = detector.detect(frame)
+                print(f"📸 Detections: {detections}")
                 process_detections(detections, telemetry)
 
             time.sleep(1)  # Adjust loop frequency as needed
@@ -116,7 +120,7 @@ def main():
     except KeyboardInterrupt:
         print("\nShutting down...")
     except Exception as e:
-        print(f"Error: {e}")
+        print(f"❌ Error: {e}")
 
 if __name__ == '__main__':
     main()
