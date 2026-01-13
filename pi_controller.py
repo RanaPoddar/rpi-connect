@@ -15,6 +15,7 @@ from modules.yellow_crop_detector import YellowCropDetector, CropDetection
 from modules.geolocation import GeoLocationCalculator
 from modules.mavlink_detection_sender import MAVLinkDetectionSender
 from pymavlink import mavutil
+import cv2
 
 # Load configuration from config.json
 def load_config():
@@ -124,13 +125,16 @@ def main():
             print("🔄 Running detection loop...")
             print(f"📡 Current telemetry: {telemetry}")
 
-            # Run detection
+            # Update frame capture logic
             with detection_lock:
-                frame = None  # Replace with actual frame capture logic
+                cap = cv2.VideoCapture(0)  # Use the correct camera index
+                ret, frame = cap.read()
+                cap.release()
+
                 detections = []  # Initialize detections as an empty list
 
-                if frame is not None:
-                    print("Processing frame for yellow detection...")
+                if ret:
+                    print("Frame captured successfully. Processing frame for yellow detection...")
                     detections = detector.detect(frame)
                     print(f"📸 Detections: {detections}")
 
@@ -139,7 +143,7 @@ def main():
                         print("Debug mode enabled. Saving detection images...")
                         detector.save_debug_images(frame, detections)
                 else:
-                    print("No frame captured.")
+                    print("Error: Unable to capture frame.")
 
                 process_detections(detections, telemetry)
 
