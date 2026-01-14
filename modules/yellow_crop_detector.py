@@ -10,6 +10,7 @@ from typing import List, Dict, Tuple, Optional
 from dataclasses import dataclass, asdict
 from datetime import datetime
 import logging
+import multiprocessing
 
 
 @dataclass
@@ -92,6 +93,11 @@ class YellowCropDetector:
         # Detection statistics
         self.total_detections = 0
         self.frame_count = 0
+        
+        # Multiprocessing queues and process
+        self.detection_queue = multiprocessing.Queue()
+        self.result_queue = multiprocessing.Queue()
+        self.process = None
         
         self.logger.info("🌾 Yellow Crop Detector initialized")
         self.logger.info(f"   Mode: Stressed Crop Detection (Competition)")
@@ -379,3 +385,48 @@ class YellowCropDetector:
             'min_area': self.min_area,
             'confidence_threshold': self.confidence_threshold
         }
+    
+    def start_detection_process(self):
+        """
+        Start the detection process in a separate process.
+        """
+        self.process = multiprocessing.Process(target=self._detection_worker, args=(self.detection_queue, self.result_queue))
+        self.process.start()
+        self.logger.info("Detection process started.")
+
+    def stop_detection_process(self):
+        """
+        Stop the detection process.
+        """
+        if self.process and self.process.is_alive():
+            self.detection_queue.put(None)  # Signal the process to stop
+            self.process.join()
+            self.logger.info("Detection process stopped.")
+
+    def _detection_worker(self, detection_queue: multiprocessing.Queue, result_queue: multiprocessing.Queue):
+        """
+        Worker function to perform detection in a separate process.
+        """
+        while True:
+            frame = detection_queue.get()
+            if frame is None:  # Stop signal
+                break
+
+            detections = self.detect(frame)
+            result_queue.put(detections)
+
+    def enqueue_frame(self, frame: np.ndarray):
+        """
+        Add a frame to the detection queue.
+        """
+        if self.process and self.process.is_alive():
+            self.detection_queue.put(frame)
+
+    def get_detections(self):
+        """
+        Retrieve detections from the result queue.
+        """
+        detections = []
+        while not self.result_queue.empty():
+            detections.extend(self.result_queue.get())
+        return detections
