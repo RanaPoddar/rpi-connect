@@ -50,7 +50,8 @@ class CropDetection:
             'longitude': self.longitude,
             'altitude': self.altitude
         }
-
+    
+##
 
 class YellowCropDetector:
     """
