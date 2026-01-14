@@ -1,6 +1,15 @@
 """
 Geolocation Module - Convert pixel coordinates to GPS coordinates
 Implements photogrammetry calculations for accurate ground coordinate mapping
+
+Horizontal FOV: ~65.2°
+Vertical FOV: ~40.3°
+Diagonal FOV: ~71.6°
+Ground Coverage at 8m Altitude:
+Width: ~10.2 m
+Height: ~6.0 m
+
+Note: Camera is fixed bottom-facing mount with an approximate 2° error.
 """
 
 import math
@@ -20,13 +29,18 @@ class GeoLocationCalculator:
         'focal_length_mm': 6.0,       # 6mm ultra wide lens
         'image_width_px': 4056,       # Image width in pixels (12.3 MP)
         'image_height_px': 3040,      # Image height in pixels
-        'fov_horizontal_deg': 66.7,   # Calculated: 2*arctan(7.9/(2*6))
-        'fov_vertical_deg': 53.1      # Calculated: 2*arctan(6.0/(2*6))
+        'fov_horizontal_deg': 65.2,   # Updated horizontal FOV
+        'fov_vertical_deg': 40.3,     # Updated vertical FOV
+        'fov_diagonal_deg': 71.6,     # Added diagonal FOV
+        'ground_coverage_8m': {
+            'width_m': 10.2,          # Ground coverage width at 8m altitude
+            'height_m': 6.0           # Ground coverage height at 8m altitude
+        }
     }
     
     # Camera mount configuration
     # -90° = bottom-facing (straight down), 0° = forward-facing
-    CAMERA_MOUNT_PITCH_DEG = -90.0  # Fixed bottom-facing mount
+    CAMERA_MOUNT_PITCH_DEG = -88.0  # Fixed bottom-facing mount with ~2° error
     
     def __init__(self, camera_params: dict = None):
         """
